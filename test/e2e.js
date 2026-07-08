@@ -13,6 +13,19 @@ const ROOT = path.join(__dirname, '..');
 const BASE = process.env.ZABBIX_URL || 'http://127.0.0.1:8089';
 const TOKEN = process.env.ZABBIX_TOKEN || (fs.existsSync(path.join(__dirname, 'token.txt')) ? fs.readFileSync(path.join(__dirname, 'token.txt'), 'utf8').trim() : (() => { throw new Error('Set ZABBIX_TOKEN (and optionally ZABBIX_URL) or create test/token.txt'); })());
 
+// SAFETY GUARD: this suite CREATES AND DELETES objects and changes global
+// settings. Refuse to run against anything that is not a local disposable
+// instance unless the operator explicitly opts in.
+{
+	const host = new URL(BASE).hostname;
+	const isLocal = ['127.0.0.1', 'localhost', '::1'].includes(host);
+	if (!isLocal && process.env.E2E_ALLOW_REMOTE !== '1') {
+		console.error('ABORTED: ' + BASE + ' is not a local instance. This suite is DESTRUCTIVE.');
+		console.error('If you are absolutely sure, set E2E_ALLOW_REMOTE=1.');
+		process.exit(2);
+	}
+}
+
 const R = (p) => require(path.join(ROOT, 'dist/nodes/Zabbix/actions', p, 'index.js'));
 const { loadOptionsMethods } = require(path.join(ROOT, 'dist/nodes/Zabbix/methods/loadOptions.js'));
 

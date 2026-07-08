@@ -1,3 +1,5 @@
+import type { IDataObject } from 'n8n-workflow';
+
 import { createCrudResource } from '../../helpers/resourceFactory';
 
 const resourceModule = createCrudResource({
@@ -6,6 +8,16 @@ const resourceModule = createCrudResource({
 	apiObject: 'hostinterface',
 	getCommonOpts: { noNameSearch: true },
 	idField: 'interfaceid',
+	// Zabbix requires BOTH `ip` and `dns` keys on create (empty string for the
+	// unused one), but blank optional fields are normally stripped from the
+	// body — so re-add them when creating (update keeps only what was set).
+	transformWriteBody(body: IDataObject): IDataObject {
+		if (!body.interfaceid) {
+			body.ip = body.ip ?? '';
+			body.dns = body.dns ?? '';
+		}
+		return body;
+	},
 	getFilters: [
 		{ name: 'hostids', displayName: 'Host IDs', description: 'Return interfaces of the given hosts' },
 	],

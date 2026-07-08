@@ -131,12 +131,16 @@ export class ZabbixTrigger implements INodeType {
 		if (typeof extra === 'object') Object.assign(params, extra);
 
 		// On the very first poll only establish the watermark, don't replay history.
-		const isFirstPoll = !staticData.lastEventId;
+		const isFirstPoll = staticData.lastEventId === undefined;
 		if (isFirstPoll) params.limit = 1;
 
 		const results = (await zabbixApiRequest.call(this, method, params)) as IDataObject[];
 
 		if (!Array.isArray(results) || results.length === 0) {
+			// Nothing open at activation time: baseline at zero so the very first
+			// problem that appears later fires (instead of being swallowed as the
+			// bootstrap sample).
+			if (isFirstPoll) staticData.lastEventId = '0';
 			return null;
 		}
 

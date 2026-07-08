@@ -16,9 +16,9 @@ const resourceModule = createCrudResource({
 	],
 	extraOps: [
 		{ name: 'Logout', value: 'logout', action: 'Log out the current user', method: 'user.logout', payload: 'none', description: 'Logs out the API session of the current user' },
-		{ name: 'Unblock', value: 'unblock', action: 'Unblock users', method: 'user.unblock', placeholder: '{ "userids": ["3","4"] }', description: 'Unblock users blocked after failed login attempts' },
-		{ name: 'Provision', value: 'provision', action: 'Provision users', method: 'user.provision', placeholder: '{ "userids": ["3"] }', description: 'Provision users from the configured user directory' },
-		{ name: 'Reset TOTP', value: 'resettotp', action: 'Reset user TOTP secrets', method: 'user.resettotp', placeholder: '{ "userids": ["3"] }', description: 'Reset the TOTP (MFA) secrets of the given users' },
+		{ name: 'Unblock', value: 'unblock', action: 'Unblock users', method: 'user.unblock', placeholder: '[3, 4]', description: 'Unblock users blocked after failed login attempts — pass a plain JSON array of user IDs' },
+		{ name: 'Provision', value: 'provision', action: 'Provision users', method: 'user.provision', placeholder: '[3]', description: 'Provision users from the configured user directory — pass a plain JSON array of user IDs' },
+		{ name: 'Reset TOTP', value: 'resettotp', action: 'Reset user TOTP secrets', method: 'user.resettotp', placeholder: '[3]', description: 'Reset the TOTP (MFA) secrets of the given users — pass a plain JSON array of user IDs' },
 	],
 	jsonWriteKeys: ['usrgrps', 'medias'],
 	writeFields: [

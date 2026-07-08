@@ -16,12 +16,13 @@ const resourceModule = createCrudResource({
 	jsonWriteKeys: ['service_tags', 'schedule', 'excluded_downtimes'],
 	writeFields: [
 		{ displayName: 'Name', name: 'name', type: 'string', default: '', description: 'Name of the SLA (required on create)' },
+		{ displayName: 'Time Zone', name: 'timezone', type: 'string', default: '', placeholder: 'UTC', description: 'Time zone used for reporting periods (required on create), e.g. UTC or America/Sao_Paulo' },
 		{
 			displayName: 'Period',
 			name: 'period',
 			type: 'options',
 			default: 0,
-			description: 'Reporting period of the SLA',
+			description: 'Reporting period of the SLA (required on create)',
 			options: [
 				{ name: 'Daily', value: 0 },
 				{ name: 'Weekly', value: 1 },
