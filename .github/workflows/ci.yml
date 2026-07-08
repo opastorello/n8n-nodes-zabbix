@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches:
+      - master
       - main
 
 # Cancel in-progress runs for the same branch/PR to avoid wasting CI minutes.
@@ -32,3 +33,29 @@ jobs:
 
       - name: Run build
         run: npm run build
+
+      - name: Run smoke tests
+        # Exercises all 223 operations against a mocked transport, asserting each
+        # builds a valid JSON-RPC request. Loads the freshly built dist/.
+        run: npm run test:smoke
+
+      - name: Verify package installs cleanly
+        # Builds the exact tarball that would ship to npm and installs it into a
+        # throwaway project, so a broken `files`/dist layout fails CI here rather
+        # than in someone's n8n. Verifies the compiled node entry points load.
+        run: |
+          set -e
+          npm pack
+          TARBALL="$(ls n8n-nodes-zabbix-*.tgz)"
+          echo "Built package: $TARBALL"
+          mkdir -p /tmp/install-check && cd /tmp/install-check
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/$TARBALL"
+          node -e "
+            const p = require('n8n-nodes-zabbix/package.json');
+            for (const f of [...p.n8n.nodes, ...p.n8n.credentials]) {
+              require('n8n-nodes-zabbix/' + f);
+              console.log('loaded', f);
+            }
+            console.log('Package installs and every node/credential entry point loads.');
+          "

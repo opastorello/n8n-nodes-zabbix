@@ -3,9 +3,9 @@
 	"version": "0.1.0",
 	"description": "n8n community nodes for the Zabbix JSON-RPC API — 60 resources, 223 operations, plus a new-problem/event trigger",
 	"license": "MIT",
-	"homepage": "https://github.com/nicolaspastorello/n8n-nodes-zabbix#readme",
+	"homepage": "https://github.com/opastorello/n8n-nodes-zabbix#readme",
 	"bugs": {
-		"url": "https://github.com/nicolaspastorello/n8n-nodes-zabbix/issues"
+		"url": "https://github.com/opastorello/n8n-nodes-zabbix/issues"
 	},
 	"keywords": [
 		"n8n-community-node-package",
@@ -20,11 +20,11 @@
 	],
 	"author": {
 		"name": "Nicolas Pastorello",
-		"email": "nicolaspastorello1@gmail.com"
+		"email": "opastorello1@gmail.com"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/nicolaspastorello/n8n-nodes-zabbix.git"
+		"url": "https://github.com/opastorello/n8n-nodes-zabbix.git"
 	},
 	"scripts": {
 		"build": "n8n-node build",
