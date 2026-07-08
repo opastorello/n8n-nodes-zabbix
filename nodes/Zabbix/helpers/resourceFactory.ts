@@ -232,7 +232,7 @@ export interface ICrudResourceConfig {
 	/** Extra id filters on Get Many (besides `<idField>s`). */
 	getFilters?: ICrudGetFilter[];
 	/** `selectX` related-object selectors offered on Get Many. */
-	selects?: Array<{ name: string; value: string }>;
+	selects?: Array<{ name: string; value: string; description?: string }>;
 	/**
 	 * Additional non-CRUD operations for this object (mass add/remove/update,
 	 * propagate, replacehostinterfaces, …). Each maps to a Zabbix method and,
@@ -397,7 +397,7 @@ export function createCrudResource(config: ICrudResourceConfig): IZabbixResource
 					type: 'multiOptions',
 					default: [],
 					description: 'Related objects to include with each result',
-					options: config.selects,
+					options: config.selects.map((sel) => ({ ...sel, description: sel.description ?? `Include the ${sel.name.toLowerCase()} of each result` })),
 					displayOptions: showFor('getAll'),
 				},
 			]
@@ -635,7 +635,7 @@ export interface IGetOnlyResourceConfig {
 	apiObject: string;
 	idsParam: string;
 	getFilters?: ICrudGetFilter[];
-	selects?: Array<{ name: string; value: string }>;
+	selects?: Array<{ name: string; value: string; description?: string }>;
 	/** Tune the shared Get Many fields (hide name search / minimal mode). */
 	getCommonOpts?: IGetCommonOpts;
 }
@@ -677,7 +677,7 @@ export function createGetOnlyResource(config: IGetOnlyResourceConfig): IZabbixRe
 						type: 'multiOptions',
 						default: [],
 						description: 'Related objects to include with each result',
-						options: config.selects,
+						options: config.selects.map((sel) => ({ ...sel, description: sel.description ?? `Include the ${sel.name.toLowerCase()} of each result` })),
 						displayOptions: showFor,
 					} as INodeProperties,
 				]

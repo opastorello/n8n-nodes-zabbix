@@ -29,8 +29,8 @@ const resourceModule = createCrudResource({
 			default: 0,
 			description: 'Whether the media type is enabled',
 			options: [
-				{ name: 'Enabled', value: 0 },
-				{ name: 'Disabled', value: 1 },
+				{ name: 'Enabled', value: 0, description: 'Media type is available for sending' },
+				{ name: 'Disabled', value: 1, description: 'Media type is turned off' },
 			],
 		},
 		{ displayName: 'Parameters (JSON)', name: 'parameters', type: 'json', default: '', description: 'Array of parameter objects (for script/webhook media types)' },

@@ -1,0 +1,84 @@
+{
+  "name": "[Zabbix] Format new-problem alert",
+  "nodes": [
+    {
+      "id": "b1",
+      "name": "On new problem",
+      "type": "n8n-nodes-zabbix.zabbixTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "event": "problem",
+        "severity": 2
+      },
+      "credentials": {
+        "zabbixTokenApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Zabbix account"
+        }
+      }
+    },
+    {
+      "id": "b2",
+      "name": "Format message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "title",
+              "type": "string",
+              "value": "={{ \"🔴 \" + $json.name }}"
+            },
+            {
+              "id": "a2",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ [\"Not classified\",\"Information\",\"Warning\",\"Average\",\"High\",\"Disaster\"][$json.severity] }}"
+            },
+            {
+              "id": "a3",
+              "name": "eventId",
+              "type": "string",
+              "value": "={{ $json.eventid }}"
+            },
+            {
+              "id": "a4",
+              "name": "when",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "On new problem": {
+      "main": [
+        [
+          {
+            "node": "Format message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

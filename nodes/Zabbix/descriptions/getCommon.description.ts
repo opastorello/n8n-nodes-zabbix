@@ -60,11 +60,22 @@ export function getCommonDescription(
 			default: 'extend',
 			description: 'Which fields to return for each result',
 			options: [
-				{ name: 'All Fields', value: 'extend' },
-				{ name: 'Count Only', value: 'count' },
-				{ name: 'IDs Only', value: 'shorten' },
+				{ name: 'All Fields', value: 'extend', description: 'Return every property of each result' },
+				{ name: 'Count Only', value: 'count', description: 'Return just the number of matching results' },
+				{ name: 'IDs Only', value: 'shorten', description: 'Return only the ID of each result' },
+				{ name: 'Specific Fields', value: 'specific', description: 'Pick exactly which fields to return from a list' },
 			],
 			displayOptions: { show },
+		},
+		{
+			displayName: 'Field Names or IDs',
+			name: 'outputSpecific',
+			type: 'multiOptions',
+			typeOptions: { loadOptionsMethod: 'getOutputFields' },
+			default: [],
+			description:
+				'The fields to return, loaded from your Zabbix. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			displayOptions: { show: { ...show, output: ['specific'] } },
 		},
 		{
 			displayName: 'Options',
@@ -97,14 +108,6 @@ export function getCommonDescription(
 									(hideNameSearch ? '' : ', beyond the Name field above'),
 							} as INodeProperties,
 						]),
-				{
-					displayName: 'Custom Output Fields',
-					name: 'outputFields',
-					type: 'string',
-					default: '',
-					placeholder: 'hostid,host,status',
-					description: 'Comma-separated list of exact fields to return (overrides Output Fields)',
-				},
 				...(opts.minimal
 					? []
 					: [
@@ -140,8 +143,8 @@ export function getCommonDescription(
 								name: 'sortorder',
 								type: 'options',
 								options: [
-									{ name: 'Ascending', value: 'ASC' },
-									{ name: 'Descending', value: 'DESC' },
+									{ name: 'Ascending', value: 'ASC', description: 'Sort A→Z / smallest first' },
+									{ name: 'Descending', value: 'DESC', description: 'Sort Z→A / largest first' },
 								],
 								default: 'ASC',
 								description: 'Sort direction applied to the sort field(s)',
@@ -162,13 +165,13 @@ export function buildCommonGetParams(this: IExecuteFunctions, itemIndex: number)
 
 	// Output selection.
 	const output = this.getNodeParameter('output', itemIndex, 'extend') as string;
-	const customOutput = (options.outputFields as string) || '';
-	if (customOutput) {
-		params.output = customOutput.split(',').map((v) => v.trim());
-	} else if (output === 'count') {
+	if (output === 'count') {
 		params.countOutput = true;
 	} else if (output === 'shorten') {
 		params.output = 'shorten';
+	} else if (output === 'specific') {
+		const fields = this.getNodeParameter('outputSpecific', itemIndex, []) as string[];
+		params.output = fields.length ? fields : 'extend';
 	} else {
 		params.output = 'extend';
 	}

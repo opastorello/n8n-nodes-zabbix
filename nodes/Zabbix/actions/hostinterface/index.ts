@@ -46,10 +46,10 @@ const resourceModule = createCrudResource({
 			default: 1,
 			description: 'Interface type',
 			options: [
-				{ name: 'Agent', value: 1 },
-				{ name: 'SNMP', value: 2 },
-				{ name: 'IPMI', value: 3 },
-				{ name: 'JMX', value: 4 },
+				{ name: 'Agent', value: 1, description: 'Zabbix agent interface' },
+				{ name: 'SNMP', value: 2, description: 'SNMP interface' },
+				{ name: 'IPMI', value: 3, description: 'IPMI interface' },
+				{ name: 'JMX', value: 4, description: 'JMX interface' },
 			],
 		},
 		{

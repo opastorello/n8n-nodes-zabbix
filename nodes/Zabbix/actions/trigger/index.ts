@@ -41,11 +41,11 @@ const resourceModule = createCrudResource({
 			description: 'Severity of the trigger',
 			options: [
 				{ name: 'Not Classified', value: 0 },
-				{ name: 'Information', value: 1 },
-				{ name: 'Warning', value: 2 },
-				{ name: 'Average', value: 3 },
-				{ name: 'High', value: 4 },
-				{ name: 'Disaster', value: 5 },
+				{ name: 'Information', value: 1, description: 'Informational — not a real problem' },
+				{ name: 'Warning', value: 2, description: 'Warning-level problem' },
+				{ name: 'Average', value: 3, description: 'Average-severity problem' },
+				{ name: 'High', value: 4, description: 'High-severity problem' },
+				{ name: 'Disaster', value: 5, description: 'Most severe — service-impacting' },
 			],
 		},
 		{
@@ -55,8 +55,8 @@ const resourceModule = createCrudResource({
 			default: 0,
 			description: 'Whether the trigger is enabled',
 			options: [
-				{ name: 'Enabled', value: 0 },
-				{ name: 'Disabled', value: 1 },
+				{ name: 'Enabled', value: 0, description: 'Trigger is active' },
+				{ name: 'Disabled', value: 1, description: 'Trigger is turned off' },
 			],
 		},
 		{

@@ -54,10 +54,10 @@ Every *Get Many* operation shares the same friendly filter set — no JSON requi
 |---|---|
 | **… Names or IDs** (dropdowns) | Multi-select lists loaded live from your Zabbix (host groups, hosts, templates, proxies, users, roles, …). **Leave empty for all**, or pick specific entries. You can also supply IDs with an expression. |
 | **Name Contains** | Case-insensitive substring search on the object name. For hosts it matches both the visible *and* the technical name. |
-| **Output Fields** | *All Fields* (default), *Count Only* (returns just the number of matches) or *IDs Only*. |
+| **Output Fields** | *All Fields* (default), *Count Only* (returns just the number of matches), *IDs Only*, or *Specific Fields* — which reveals a checklist of the object's real property names, **loaded live from your Zabbix**, so you pick fields instead of typing them. |
 | **Select Related** | Include related objects with each result (e.g. a host's items, tags, interfaces, templates). |
 | **Options → Limit / Sort Field / Sort Order / Editable Only** | Standard paging and sorting. |
-| **Options → Advanced Filter (JSON) / Advanced Search (JSON) / Custom Output Fields** | Power-user escape hatches for exact-match filters, extra substring searches, or a precise field list. Never required for common cases. |
+| **Options → Advanced Filter (JSON) / Advanced Search (JSON)** | Power-user escape hatches for exact-match filters or extra substring searches. Never required for common cases. |
 
 **Example — all monitored hosts of a group whose name contains "router":**
 Resource `Host` → Operation `Get Many` → pick the group in **Host Group Names or IDs** → type `router` in **Name Contains**.
@@ -131,6 +131,19 @@ The agent will call *Problem → Get Many* (severity filter), *Host → Get Many
 
 **5. Put a host into maintenance from chat:**
 `Chat Trigger` → `AI Agent` with Zabbix tool → agent calls *Host → Get Many* (Name Contains) then *Maintenance → Create*.
+
+### Ready-to-import templates
+
+The [`templates/`](templates/) folder has four simple, no-AI workflows you can import (**Workflows → Import from File**) and run after selecting your Zabbix credential:
+
+| File | Flow |
+|---|---|
+| `daily-problem-digest.json` | Schedule (08:00) → Problem *Get Many* → Code (severity summary) |
+| `format-new-problem-alert.json` | Zabbix Trigger (new problem) → Set (formatted alert fields) |
+| `auto-acknowledge-disaster.json` | Zabbix Trigger → IF (severity = Disaster) → Event *Acknowledge* |
+| `export-hosts-to-csv.json` | Manual → Host *Get Many* (specific fields) → Convert to CSV file |
+
+Each references a credential by the placeholder id `REPLACE_WITH_YOUR_CREDENTIAL_ID`; on first open, just pick your credential from the node's dropdown.
 
 ## Resource reference
 

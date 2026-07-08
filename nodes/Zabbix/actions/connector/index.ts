@@ -28,8 +28,8 @@ const resourceModule = createCrudResource({
 			default: 1,
 			description: 'Whether the connector is enabled',
 			options: [
-				{ name: 'Enabled', value: 1 },
-				{ name: 'Disabled', value: 0 },
+				{ name: 'Enabled', value: 1, description: 'Connector is active' },
+				{ name: 'Disabled', value: 0, description: 'Connector is turned off' },
 			],
 		},
 		tagsField('connector'),

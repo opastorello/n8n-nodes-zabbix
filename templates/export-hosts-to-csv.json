@@ -1,0 +1,89 @@
+{
+  "name": "[Zabbix] Export hosts to CSV",
+  "nodes": [
+    {
+      "id": "d1",
+      "name": "When clicking Execute",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "d2",
+      "name": "Zabbix: Get hosts",
+      "type": "n8n-nodes-zabbix.zabbix",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "resource": "host",
+        "operation": "getAll",
+        "output": "specific",
+        "outputSpecific": [
+          "hostid",
+          "host",
+          "name",
+          "status"
+        ],
+        "options": {
+          "limit": 500
+        }
+      },
+      "credentials": {
+        "zabbixTokenApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Zabbix account"
+        }
+      }
+    },
+    {
+      "id": "d3",
+      "name": "To CSV file",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "When clicking Execute": {
+      "main": [
+        [
+          {
+            "node": "Zabbix: Get hosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zabbix: Get hosts": {
+      "main": [
+        [
+          {
+            "node": "To CSV file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

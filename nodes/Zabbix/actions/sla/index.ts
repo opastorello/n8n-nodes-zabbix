@@ -24,9 +24,9 @@ const resourceModule = createCrudResource({
 			default: 0,
 			description: 'Reporting period of the SLA (required on create)',
 			options: [
-				{ name: 'Daily', value: 0 },
-				{ name: 'Weekly', value: 1 },
-				{ name: 'Monthly', value: 2 },
+				{ name: 'Daily', value: 0, description: 'One reporting period per day' },
+				{ name: 'Weekly', value: 1, description: 'One reporting period per week' },
+				{ name: 'Monthly', value: 2, description: 'One reporting period per month' },
 				{ name: 'Quarterly', value: 3 },
 				{ name: 'Annually', value: 4 },
 			],

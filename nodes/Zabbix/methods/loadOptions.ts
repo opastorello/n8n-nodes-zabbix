@@ -1,4 +1,4 @@
-import type { ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
+import type { IDataObject, ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
 
 import { zabbixApiRequest } from '../transport';
 
@@ -61,6 +61,34 @@ export async function getRoles(this: ILoadOptionsFunctions): Promise<INodeProper
 	return loadNamed(this, 'role.get', 'roleid');
 }
 
+/**
+ * Load the actual property names of the selected resource, so "Output Fields →
+ * Specific Fields" is a checklist instead of a free-text list. Fetches one full
+ * object of the current resource and offers its keys. The resource dropdown
+ * value equals the Zabbix object name for every CRUD/get resource.
+ */
+export async function getOutputFields(
+	this: ILoadOptionsFunctions,
+): Promise<INodePropertyOptions[]> {
+	const resource = this.getCurrentNodeParameter('resource') as string;
+	if (!resource) return [];
+	try {
+		const rows = (await zabbixApiRequest.call(this, `${resource}.get`, {
+			output: 'extend',
+			limit: 1,
+		})) as IDataObject[];
+		if (Array.isArray(rows) && rows[0]) {
+			return Object.keys(rows[0])
+				.sort()
+				.map((key) => ({ name: key, value: key }));
+		}
+	} catch {
+		// No permission / no objects yet / method has no output — fall back to
+		// the free-text override so the user is never blocked.
+	}
+	return [];
+}
+
 /** Registry of every load-options method, wired into both nodes' `methods.loadOptions`. */
 export const loadOptionsMethods = {
 	getHostGroups,
@@ -72,4 +100,5 @@ export const loadOptionsMethods = {
 	getUserGroups,
 	getUsers,
 	getRoles,
+	getOutputFields,
 };

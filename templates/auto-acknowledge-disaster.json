@@ -1,0 +1,112 @@
+{
+  "name": "[Zabbix] Auto-acknowledge disaster problems",
+  "nodes": [
+    {
+      "id": "c1",
+      "name": "On new problem",
+      "type": "n8n-nodes-zabbix.zabbixTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "event": "problem",
+        "severity": 0
+      },
+      "credentials": {
+        "zabbixTokenApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Zabbix account"
+        }
+      }
+    },
+    {
+      "id": "c2",
+      "name": "Is Disaster?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "x",
+              "leftValue": "={{ $json.severity }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c3",
+      "name": "Acknowledge event",
+      "type": "n8n-nodes-zabbix.zabbix",
+      "typeVersion": 1,
+      "position": [
+        540,
+        -60
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "acknowledge",
+        "ackEventids": "={{ $json.eventid }}",
+        "action": [
+          2,
+          4
+        ],
+        "message": "Auto-acknowledged by n8n (disaster severity)"
+      },
+      "credentials": {
+        "zabbixTokenApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Zabbix account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On new problem": {
+      "main": [
+        [
+          {
+            "node": "Is Disaster?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Disaster?": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

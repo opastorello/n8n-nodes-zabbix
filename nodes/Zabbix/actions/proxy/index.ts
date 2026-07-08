@@ -18,8 +18,8 @@ const resourceModule = createCrudResource({
 			default: 0,
 			description: 'Operating mode of the proxy',
 			options: [
-				{ name: 'Active', value: 0 },
-				{ name: 'Passive', value: 1 },
+				{ name: 'Active', value: 0, description: 'Proxy connects to the Zabbix server' },
+				{ name: 'Passive', value: 1, description: 'Zabbix server connects to the proxy' },
 			],
 		},
 		{ displayName: 'Address', name: 'address', type: 'string', default: '', description: 'Address for the passive proxy' },
