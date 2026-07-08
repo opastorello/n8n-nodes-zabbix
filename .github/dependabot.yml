@@ -7,6 +7,14 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # eslint and typescript are held on the major @n8n/node-cli pins to.
+      # A major bump breaks `npm run lint`/`npm run build`, so Dependabot's
+      # major PRs fail forever — take them deliberately, not automatically.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
