@@ -1,0 +1,19 @@
+{
+	"node": "n8n-nodes-zabbix.zabbixTrigger",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Utility"],
+	"alias": ["monitoring", "alert", "problem", "event", "incident", "on new problem", "NOC"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://www.zabbix.com/documentation/current/en/manual/web_interface/frontend_sections/users/api_tokens"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://www.zabbix.com/documentation/current/en/manual/api"
+			}
+		]
+	}
+}

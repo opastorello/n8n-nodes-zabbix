@@ -1,19 +1,30 @@
 {
-	"name": "n8n-nodes-<...>",
+	"name": "n8n-nodes-zabbix",
 	"version": "0.1.0",
-	"description": "",
+	"description": "n8n community nodes for the Zabbix JSON-RPC API — 60 resources, 223 operations, plus a new-problem/event trigger",
 	"license": "MIT",
-	"homepage": "",
+	"homepage": "https://github.com/nicolaspastorello/n8n-nodes-zabbix#readme",
+	"bugs": {
+		"url": "https://github.com/nicolaspastorello/n8n-nodes-zabbix/issues"
+	},
 	"keywords": [
-		"n8n-community-node-package"
+		"n8n-community-node-package",
+		"zabbix",
+		"zabbix-api",
+		"monitoring",
+		"observability",
+		"alerting",
+		"snmp",
+		"noc",
+		"n8n"
 	],
 	"author": {
-		"name": "",
-		"email": ""
+		"name": "Nicolas Pastorello",
+		"email": "nicolaspastorello1@gmail.com"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<...>/n8n-nodes-<...>.git"
+		"url": "https://github.com/nicolaspastorello/n8n-nodes-zabbix.git"
 	},
 	"scripts": {
 		"build": "n8n-node build",
@@ -22,7 +33,9 @@
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
 		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
+		"prepublishOnly": "n8n-node prerelease",
+		"test:smoke": "node test/smoke.js",
+		"test:e2e": "node test/e2e.js"
 	},
 	"files": [
 		"dist"
@@ -31,17 +44,17 @@
 		"n8nNodesApiVersion": 1,
 		"strict": true,
 		"credentials": [
-			"dist/credentials/GithubIssuesApi.credentials.js",
-			"dist/credentials/GithubIssuesOAuth2Api.credentials.js"
+			"dist/credentials/ZabbixTokenApi.credentials.js"
 		],
 		"nodes": [
-			"dist/nodes/GithubIssues/GithubIssues.node.js",
-			"dist/nodes/Example/Example.node.js"
+			"dist/nodes/Zabbix/Zabbix.node.js",
+			"dist/nodes/Zabbix/ZabbixTrigger.node.js"
 		]
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
-		"eslint": "9.39.4",
+		"eslint": "9.29.0",
+		"n8n-workflow": "^2.16.0",
 		"prettier": "3.8.3",
 		"release-it": "20.2.0",
 		"typescript": "5.9.3"

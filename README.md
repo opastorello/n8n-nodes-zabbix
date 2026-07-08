@@ -1,262 +1,250 @@
-![Banner image](https://user-images.githubusercontent.com/10284570/173569848-c624317f-42b1-45a6-ab09-f0ea3c247648.png)
+# n8n-nodes-zabbix
 
-# n8n-nodes-starter
+An [n8n](https://n8n.io) community node package for the **Zabbix JSON-RPC API** (built and tested against **Zabbix 7.4**). It ships two nodes:
 
-This starter repository helps you build custom integrations for [n8n](https://n8n.io). It includes example nodes, credentials, the node linter, and all the tooling you need to get started.
+- **Zabbix** — action node with **60 resources / 223 operations** covering the full Zabbix API (hosts, items, triggers, problems, events, templates, maintenances, users, dashboards, scripts, configuration import/export, and more).
+- **Zabbix Trigger** — a polling trigger that starts your workflow when a **new problem** or **new event** appears in Zabbix.
 
-## Quick Start
+Both nodes are marked `usableAsTool`, so an **n8n AI Agent** can call them as tools ("list the disaster-severity problems", "acknowledge event 9001", …).
 
-> [!TIP]
-> **New to building n8n nodes?** The fastest way to get started is with `npm create @n8n/node`. This command scaffolds a complete node package for you using the [@n8n/node-cli](https://www.npmjs.com/package/@n8n/node-cli).
+## Table of contents
 
-**To create a new node package from scratch:**
+- [Installation](#installation)
+- [Credentials](#credentials)
+- [The Zabbix node](#the-zabbix-node)
+  - [Reading data (Get Many)](#reading-data-get-many)
+  - [Creating and updating objects](#creating-and-updating-objects)
+  - [Deleting objects](#deleting-objects)
+  - [Special operations](#special-operations)
+- [The Zabbix Trigger node](#the-zabbix-trigger-node)
+- [Using with AI Agents](#using-with-ai-agents)
+- [Example workflows](#example-workflows)
+- [Resource reference](#resource-reference)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
-```bash
-npm create @n8n/node
-```
+## Installation
 
-**Already using this starter? Start developing with:**
+In n8n: **Settings → Community Nodes → Install** and enter `n8n-nodes-zabbix`.
 
-```bash
-npm run dev
-```
+For local development see [Development](#development).
 
-This starts n8n with your nodes loaded and hot reload enabled.
+## Credentials
 
-## What's Included
+Create a **Zabbix Token API** credential:
 
-This starter repository includes two example nodes to learn from:
+| Field | Value |
+|---|---|
+| **Zabbix URL** | Base URL of the Zabbix frontend, e.g. `https://zabbix.example.com` or `https://example.com/zabbix`. Do **not** include `/api_jsonrpc.php` — it is appended automatically. |
+| **API Token** | An API token created in Zabbix under **Users → API tokens** (Zabbix 5.4+). Sent as an `Authorization: Bearer` header. |
 
-- **[Example Node](nodes/Example/)** - A simple starter node that shows the basic structure with a custom `execute` method
-- **[GitHub Issues Node](nodes/GithubIssues/)** - A complete, production-ready example built using the **declarative style**:
-  - **Low-code approach** - Define operations declaratively without writing request logic
-  - Multiple resources (Issues, Comments)
-  - Multiple operations (Get, Get All, Create)
-  - Two authentication methods (OAuth2 and Personal Access Token)
-  - List search functionality for dynamic dropdowns
-  - Proper error handling and typing
-  - Ideal for HTTP API-based integrations
+Clicking **Save** runs a connection test (a lightweight authenticated `host.get`). A green check means both the URL and the token are valid. An *"Invalid Zabbix API token or URL"* error means the token was rejected.
 
-> [!TIP]
-> The declarative/low-code style (used in GitHub Issues) is the recommended approach for building nodes that interact with HTTP APIs. It significantly reduces boilerplate code and handles requests automatically.
+> **Tip:** create a dedicated Zabbix user with a role limited to what your workflows need, and generate the token for that user. Read-only workflows should use a read-only token.
 
-Browse these examples to understand both approaches, then modify them or create your own.
+## The Zabbix node
 
-## Finding Inspiration
+Pick a **Resource** (Host, Problem, Item, …) and an **Operation**. Every operation maps 1:1 to a Zabbix API method (e.g. *Host → Get Many* calls `host.get`).
 
-Looking for more examples? Check out these resources:
+### Reading data (Get Many)
 
-- **[npm Community Nodes](https://www.npmjs.com/search?q=keywords:n8n-community-node-package)** - Browse thousands of community-built nodes on npm using the `n8n-community-node-package` tag
-- **[n8n Built-in Nodes](https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/nodes)** - Study the source code of n8n's official nodes for production-ready patterns and best practices
-- **[n8n Credentials](https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/credentials)** - See how authentication is implemented for various services
+Every *Get Many* operation shares the same friendly filter set — no JSON required:
 
-These are excellent resources to understand how to structure your nodes, handle different API patterns, and implement advanced features.
+| Field | What it does |
+|---|---|
+| **… Names or IDs** (dropdowns) | Multi-select lists loaded live from your Zabbix (host groups, hosts, templates, proxies, users, roles, …). **Leave empty for all**, or pick specific entries. You can also supply IDs with an expression. |
+| **Name Contains** | Case-insensitive substring search on the object name. For hosts it matches both the visible *and* the technical name. |
+| **Output Fields** | *All Fields* (default), *Count Only* (returns just the number of matches) or *IDs Only*. |
+| **Select Related** | Include related objects with each result (e.g. a host's items, tags, interfaces, templates). |
+| **Options → Limit / Sort Field / Sort Order / Editable Only** | Standard paging and sorting. |
+| **Options → Advanced Filter (JSON) / Advanced Search (JSON) / Custom Output Fields** | Power-user escape hatches for exact-match filters, extra substring searches, or a precise field list. Never required for common cases. |
 
-## Prerequisites
+**Example — all monitored hosts of a group whose name contains "router":**
+Resource `Host` → Operation `Get Many` → pick the group in **Host Group Names or IDs** → type `router` in **Name Contains**.
 
-Before you begin, install the following on your development machine:
+**Cross-object filtering** works the same way everywhere: *Item → Get Many* filtered by **Host**, *Problem → Get Many* filtered by **Host Group**, *Trigger → Get Many* filtered by **Template**, and so on.
 
-### Required
+### Creating and updating objects
 
-- **[Node.js](https://nodejs.org/)** (v22 or higher) and npm
-  - Linux/Mac/WSL: Install via [nvm](https://github.com/nvm-sh/nvm)
-  - Windows: Follow [Microsoft's NodeJS guide](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows)
-- **[git](https://git-scm.com/downloads)**
+- **Create** shows the **required fields at the top** (marked with `*`). Example: *Host → Create* asks for Technical Name, Group IDs and Interfaces.
+- **Update** asks for the object **ID** plus the same fields as optional ("leave empty to keep unchanged").
+- **Additional Fields** holds every optional typed property.
+- **Structured editors instead of JSON** for the common nested inputs:
+  - **Host Interfaces** — "Add Interface" rows with Type (Agent/SNMP/IPMI/JMX), Connect Via (the IP or DNS field appears accordingly), Port with the right default, and SNMP details only for SNMP.
+  - **Tags** — "Add Tag" rows (Tag/Value) on Host, Item, Trigger, Template, Web Scenario, Connector and Maintenance.
+  - **Macros** — "Add Macro" rows ({$MACRO}/Value) on Host and Template.
+  - **Maintenance** — date/time pickers for the active window and "Add Time Period" rows (converted to epoch automatically); host groups and hosts are picked from dropdowns.
+- **Additional Parameters (JSON)** (inside Additional Fields) lets you send *any* API property that isn't exposed as a typed field — the node never blocks you from using the full API. Remaining deeply nested structures (action operations, dashboard pages, web-scenario steps, …) are JSON, matching the [Zabbix API object formats](https://www.zabbix.com/documentation/current/en/manual/api).
 
-### Recommended
+**Example — create a host:**
+Resource `Host` → Operation `Create` → Technical Name `web-01`, Group IDs `2` → **Add Interface** → Type *Agent*, Connect Via *IP*, IP `10.0.0.5`. No JSON needed.
 
-- Follow n8n's [development environment setup guide](https://docs.n8n.io/integrations/creating-nodes/build/node-development-environment/)
-
-> [!NOTE]
-> The `@n8n/node-cli` is included as a dev dependency and will be installed automatically when you run `npm install`. The CLI includes n8n for local development, so you don't need to install n8n globally.
-
-## Getting Started with this Starter
-
-Follow these steps to create your own n8n community node package:
-
-### 1. Create Your Repository
-
-[Generate a new repository](https://github.com/n8n-io/n8n-nodes-starter/generate) from this template, then clone it:
-
-```bash
-git clone https://github.com/<your-organization>/<your-repo-name>.git
-cd <your-repo-name>
-```
-
-### 2. Install Dependencies
-
-```bash
-npm install
-```
-
-This installs all required dependencies including the `@n8n/node-cli`.
-
-### 3. Explore the Examples
-
-Browse the example nodes in [nodes/](nodes/) and [credentials/](credentials/) to understand the structure:
-
-- Start with [nodes/Example/](nodes/Example/) for a basic node
-- Study [nodes/GithubIssues/](nodes/GithubIssues/) for a real-world implementation
-
-### 4. Build Your Node
-
-Edit the example nodes to fit your use case, or create new node files by copying the structure from [nodes/Example/](nodes/Example/).
-
-> [!TIP]
-> If you want to scaffold a completely new node package, use `npm create @n8n/node` to start fresh with the CLI's interactive generator.
-
-### 5. Configure Your Package
-
-Update `package.json` with your details:
-
-- `name` - Your package name (must start with `n8n-nodes-`)
-- `author` - Your name and email
-- `repository` - Your repository URL
-- `description` - What your node does
-
-Make sure your node is registered in the `n8n.nodes` array.
-
-### 6. Develop and Test Locally
-
-Start n8n with your node loaded:
-
-```bash
-npm run dev
-```
-
-This command runs `n8n-node dev` which:
-
-- Builds your node with watch mode
-- Starts n8n with your node available
-- Automatically rebuilds when you make changes
-- Opens n8n in your browser (usually http://localhost:5678)
-
-You can now test your node in n8n workflows!
-
-> [!NOTE]
-> Learn more about CLI commands in the [@n8n/node-cli documentation](https://www.npmjs.com/package/@n8n/node-cli).
-
-### 7. Lint Your Code
-
-Check for errors:
-
-```bash
-npm run lint
-```
-
-Auto-fix issues when possible:
-
-```bash
-npm run lint:fix
-```
-
-### 8. Build for Production
-
-When ready to publish:
-
-```bash
-npm run build
-```
-
-This compiles your TypeScript code to the `dist/` folder.
-
-### 9. Prepare for Publishing
-
-Before publishing:
-
-1. **Update documentation**: Replace this README with your node's documentation. Use [README_TEMPLATE.md](README_TEMPLATE.md) as a starting point.
-2. **Update the LICENSE**: Add your details to the [LICENSE](LICENSE.md) file.
-3. **Test thoroughly**: Ensure your node works in different scenarios.
-
-### 10. Publish to npm
-
-Publishing is handled automatically by the included GitHub Actions workflow ([.github/workflows/publish.yml](.github/workflows/publish.yml)). It runs on every version tag push and publishes to npm with a provenance attestation — a requirement for n8n community nodes starting May 1, 2026.
-
-#### One-time setup
-
-Configure npm to trust this repository's GitHub Actions workflow so it can publish on your behalf. Log in to [npmjs.com](https://npmjs.com), open your package settings, and under **Publish access → Trusted Publishers** add a publisher with:
-
-- **Repository owner**: your GitHub username or org
-- **Repository name**: your repo name
-- **Workflow name**: `publish.yml`
-
-No token or secret needs to be stored in GitHub — the workflow uses GitHub's OIDC token instead.
-
-> [!NOTE]
-> If you prefer a traditional npm token, create a Granular Access Token on npmjs.com and store it as `NPM_TOKEN` in your repository's Actions secrets. See the comments at the top of `.github/workflows/publish.yml` for details.
-
-#### Releasing a new version
-
-```bash
-npm run release
-```
-
-This lints, builds, prompts for a version bump, updates the changelog, commits, tags, and pushes — which triggers the workflow to publish to npm.
-
-### 11. Submit for Verification (Optional)
-
-Get your node verified for n8n Cloud:
-
-1. Ensure your node meets the [requirements](https://docs.n8n.io/integrations/creating-nodes/deploy/submit-community-nodes/):
-   - Uses MIT license ✅ (included in this starter)
-   - No external package dependencies
-   - Follows n8n's design guidelines
-   - Passes quality and security review
-
-2. Submit through the [n8n Creator Portal](https://creators.n8n.io/nodes)
-
-**Benefits of verification:**
-
-- Available directly in n8n Cloud
-- Discoverable in the n8n nodes panel
-- Verified badge for quality assurance
-- Increased visibility in the n8n community
-
-## Available Scripts
-
-This starter includes several npm scripts to streamline development:
-
-| Script                | Description                                                                 |
-| --------------------- | --------------------------------------------------------------------------- |
-| `npm run dev`         | Start n8n with your node and watch for changes (runs `n8n-node dev`)        |
-| `npm run build`       | Compile TypeScript to JavaScript for production (runs `n8n-node build`)     |
-| `npm run build:watch` | Build in watch mode (auto-rebuild on changes)                               |
-| `npm run lint`        | Check your code for errors and style issues (runs `n8n-node lint`)          |
-| `npm run lint:fix`    | Automatically fix linting issues when possible (runs `n8n-node lint --fix`) |
-| `npm run release`     | Create a new release (runs `n8n-node release`)                              |
-
-> [!TIP]
-> These scripts use the [@n8n/node-cli](https://www.npmjs.com/package/@n8n/node-cli) under the hood. You can also run CLI commands directly, e.g., `npx n8n-node dev`.
+### Deleting objects
+
+*Delete* takes a comma-separated list of IDs and removes all of them in one call. **This is irreversible** — test with *Get Many* first to confirm you have the right IDs.
+
+### Special operations
+
+Beyond CRUD, the node exposes every extra verb of the API:
+
+- **Event → Acknowledge** — acknowledge/close/comment/change severity on events (actions are combined automatically).
+- **Script → Execute / Get Scripts by Hosts / Get Scripts by Events** — run remediation scripts on a host or event.
+- **History → Get Many / Push / Clear** and **Trend → Get Many** — read or inject metric data.
+- **Configuration → Export / Import / Import Compare** — backup or migrate configuration (JSON/XML/YAML).
+- **Host / Template / Host Group / Template Group / Host Interface → Mass \*** — bulk add/remove/update relations; **Propagate** pushes group permissions to subgroups.
+- **SLA → Get SLI** — service-level indicator report; **Token → Generate**; **User → Unblock / Provision / Reset TOTP / Logout**; **User Directory → Test**; **Task → Create** (e.g. "check now" for an item).
+
+## The Zabbix Trigger node
+
+Starts a workflow when something new happens in Zabbix (polling — configure the interval on the node's *Settings → Poll Times*).
+
+| Field | What it does |
+|---|---|
+| **Trigger On** | *New Problem* (`problem.get`) or *New Event* (`event.get`). |
+| **Host Group Names or IDs** | Only fire for these groups (empty = all). Loaded live from Zabbix. |
+| **Minimum Severity** | Problems only: fire at or above this severity (e.g. *High* fires for High + Disaster). |
+| **Additional Filters (JSON)** | Optional raw parameters merged into the poll request (e.g. `{"tags":[{"tag":"env","value":"prod"}]}`). |
+
+**Exactly-once delivery:** the node keeps a watermark on the highest event ID it has seen. The first poll only establishes the watermark (no replay of old problems); each subsequent new problem/event fires exactly once, emitted oldest-first. *Test workflow* (manual run) shows the latest problem so you can build the downstream mapping.
+
+## Using with AI Agents
+
+Both nodes have `usableAsTool: true`. Attach the **Zabbix** node as a tool of an **AI Agent** and the model can query and act on Zabbix by itself:
+
+> *"Which hosts have disaster-severity problems right now? Acknowledge the ones on the staging group."*
+
+The agent will call *Problem → Get Many* (severity filter), *Host → Get Many* and *Event → Acknowledge* as needed. Combine with the **Zabbix Trigger** to build a NOC auto-triage loop: new problem → agent enriches (host, items, history) → decides → acknowledges/runs a script/notifies.
+
+## Example workflows
+
+**1. Alert routing (NOC):**
+`Zabbix Trigger (New Problem, severity ≥ High)` → `Slack/Teams/Email` with `{{$json.name}}` and `{{$json.severity}}`.
+
+**2. Auto-acknowledge known noise:**
+`Zabbix Trigger (New Problem)` → `IF name contains "ICMP ping loss"` → `Zabbix: Event → Acknowledge` (action *Acknowledge* + *Add Message* "auto-ack: transient link noise").
+
+**3. Daily report:**
+`Schedule (08:00)` → `Zabbix: Problem → Get Many` (Output Fields: All) → `Code/AI summarize` → `Email`.
+
+**4. Provisioning from a spreadsheet:**
+`Google Sheets` → `Zabbix: Host → Create` (map columns to Technical Name / Group IDs / Interfaces).
+
+**5. Put a host into maintenance from chat:**
+`Chat Trigger` → `AI Agent` with Zabbix tool → agent calls *Host → Get Many* (Name Contains) then *Maintenance → Create*.
+
+## Resource reference
+
+All 60 resources and their operations (each maps to the same-named `object.method` of the Zabbix API):
+
+| Resource | Operations |
+|---|---|
+| Action | Create, Delete, Get Many, Update |
+| Alert | Get Many |
+| API Info | Get Version |
+| Audit Log | Get Many |
+| Authentication | Get, Update |
+| Auto Registration | Get, Update |
+| Configuration | Export, Import, Import Compare |
+| Connector | Create, Delete, Get Many, Update |
+| Correlation | Create, Delete, Get Many, Update |
+| Dashboard | Create, Delete, Get Many, Update |
+| Discovered Host | Get Many |
+| Discovered Service | Get Many |
+| Discovery Check | Get Many |
+| Discovery Rule | Create, Delete, Get Many, Update |
+| Event | Acknowledge, Get Many |
+| Global Macro | Create, Delete, Get Many, Update |
+| Graph | Create, Delete, Get Many, Update |
+| Graph Item | Get Many |
+| Graph Prototype | Create, Delete, Get Many, Update |
+| HA Node | Get Many |
+| History | Clear, Get Many, Push |
+| Host | Create, Delete, Get Many, Mass Add, Mass Remove, Mass Update, Update |
+| Host Group | Create, Delete, Get Many, Mass Add, Mass Remove, Mass Update, Propagate, Update |
+| Host Interface | Create, Delete, Get Many, Mass Add, Mass Remove, Replace Host Interfaces, Update |
+| Host Prototype | Create, Delete, Get Many, Update |
+| Housekeeping | Get, Update |
+| Icon Map | Create, Delete, Get Many, Update |
+| Image | Create, Delete, Get Many, Update |
+| Item | Create, Delete, Get Many, Update |
+| Item Prototype | Create, Delete, Get Many, Update |
+| LLD Rule | Create, Delete, Get Many, Update |
+| LLD Rule Prototype | Create, Delete, Get Many, Update |
+| Maintenance | Create, Delete, Get Many, Update |
+| Map | Create, Delete, Get Many, Update |
+| Media Type | Create, Delete, Get Many, Update |
+| MFA Method | Create, Delete, Get Many, Update |
+| Module | Create, Delete, Get Many, Update |
+| Problem | Get Many |
+| Proxy | Create, Delete, Get Many, Update |
+| Proxy Group | Create, Delete, Get Many, Update |
+| Regular Expression | Create, Delete, Get Many, Update |
+| Role | Create, Delete, Get Many, Update |
+| Scheduled Report | Create, Delete, Get Many, Update |
+| Script | Create, Delete, Execute, Get Many, Get Scripts by Events, Get Scripts by Hosts, Update |
+| Service | Create, Delete, Get Many, Update |
+| Settings | Get, Update |
+| SLA | Create, Delete, Get Many, Get SLI, Update |
+| Task | Create, Get Many |
+| Template | Create, Delete, Get Many, Mass Add, Mass Remove, Mass Update, Update |
+| Template Dashboard | Create, Delete, Get Many, Update |
+| Template Group | Create, Delete, Get Many, Mass Add, Mass Remove, Mass Update, Propagate, Update |
+| Token | Create, Delete, Generate, Get Many, Update |
+| Trend | Get Many |
+| Trigger | Create, Delete, Get Many, Update |
+| Trigger Prototype | Create, Delete, Get Many, Update |
+| User | Create, Delete, Get Many, Logout, Provision, Reset TOTP, Unblock, Update |
+| User Directory | Create, Delete, Get Many, Test, Update |
+| User Group | Create, Delete, Get Many, Update |
+| Value Map | Create, Delete, Get Many, Update |
+| Web Scenario | Create, Delete, Get Many, Update |
+
+Method coverage vs the Zabbix 7.4 specification: **223 of 226** methods are exposed as typed operations. The remaining 3 are intentional: `user.login` (replaced by the token credential) and host-level `usermacro.create/update/delete` (managed through the **Host** resource's Macros field; the **Global Macro** resource covers the global variants).
 
 ## Troubleshooting
 
-### My node doesn't appear in n8n
+| Symptom | Cause / fix |
+|---|---|
+| Credential test fails with *"Invalid Zabbix API token or URL"* | Token revoked/expired/mistyped, or the URL doesn't point at the Zabbix frontend. Confirm `https://<url>/api_jsonrpc.php` answers and regenerate the token under **Users → API tokens**. |
+| `Not authorised` / `Session terminated, re-login` on execution | The token was rejected. Rotate it in Zabbix and update the credential. |
+| A dropdown ("… Names or IDs") is empty | The token's user can't see those objects (Zabbix permissions), or the connection failed — check the credential test. |
+| `Invalid params.` with details | Zabbix rejected a parameter; the error description echoes the API's exact complaint (e.g. a required property missing in a JSON field). Compare with the [Zabbix API docs](https://www.zabbix.com/documentation/current/en/manual/api) for that object. |
+| Trigger never fires | It only emits problems/events **newer than the first poll**. Cause a new problem (or lower the severity filter) and wait for the next poll interval. |
+| `apiinfo.version` errors about the authorization header | Fixed in this node (the version call is sent unauthenticated, as Zabbix requires). Update the package if you see this. |
 
-1. Make sure you ran `npm install` to install dependencies
-2. Check that your node is listed in `package.json` under `n8n.nodes`
-3. Restart the dev server with `npm run dev`
-4. Check the console for any error messages
+## Development
 
-### Linting errors
+```bash
+npm install
+npm run dev     # builds + launches a local n8n at http://localhost:5678 with hot reload
+npm run lint    # n8n community-node linter
+npm run build   # compile to dist/
+```
 
-Run `npm run lint:fix` to automatically fix most common issues. For remaining errors, check the [n8n node development guidelines](https://docs.n8n.io/integrations/creating-nodes/).
+### Testing
 
-### TypeScript errors
+```bash
+npm run build && npm run test:smoke   # all 223 operations against a mocked transport (no server needed)
+```
 
-Make sure you're using Node.js v22 or higher and have run `npm install` to get all type definitions.
+End-to-end suite against a **disposable** Zabbix 7.4 (creates and deletes real objects — never point it at production):
+
+```bash
+docker compose -f test/docker-compose.zabbix.yml up -d   # Zabbix 7.4 at http://localhost:8089 (Admin/zabbix)
+# create an API token in the UI (or via user.login + token.create), then:
+ZABBIX_TOKEN=<token> npm run test:e2e
+```
+
+The e2e suite covers the full lifecycle — host group/host/item/trigger/template create, filtered gets, dynamic dropdowns, tag/macro/interface structured fields, history push+get, mass add, maintenance with time periods, script execute helpers, configuration export, and deletes everything it created.
+
+Architecture notes for contributors live in the repository (resource modules under `nodes/Zabbix/actions/`, one folder per Zabbix object; shared CRUD factory in `helpers/resourceFactory.ts`; JSON-RPC transport in `transport/`).
 
 ## Resources
 
-- **[n8n Node Documentation](https://docs.n8n.io/integrations/creating-nodes/)** - Complete guide to building nodes
-- **[n8n Community Forum](https://community.n8n.io/)** - Get help and share your nodes
-- **[@n8n/node-cli Documentation](https://www.npmjs.com/package/@n8n/node-cli)** - CLI tool reference
-- **[n8n Creator Portal](https://creators.n8n.io/nodes)** - Submit your node for verification
-- **[Submit Community Nodes Guide](https://docs.n8n.io/integrations/creating-nodes/deploy/submit-community-nodes/)** - Verification requirements and process
-
-## Contributing
-
-Have suggestions for improving this starter? [Open an issue](https://github.com/n8n-io/n8n-nodes-starter/issues) or submit a pull request!
+- [Zabbix API documentation](https://www.zabbix.com/documentation/current/en/manual/api)
+- [Zabbix API tokens](https://www.zabbix.com/documentation/current/en/manual/web_interface/frontend_sections/users/api_tokens)
+- [n8n community nodes](https://docs.n8n.io/integrations/community-nodes/)
 
 ## License
 
-[MIT](https://github.com/n8n-io/n8n-nodes-starter/blob/master/LICENSE.md)
+[MIT](LICENSE.md)
