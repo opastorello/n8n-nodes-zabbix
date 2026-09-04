@@ -92,7 +92,6 @@ export class ZabbixTrigger implements INodeType {
 				description: 'Extra parameters merged into the problem.get / event.get request',
 			},
 		],
-		usableAsTool: true,
 	};
 
 	methods = {
