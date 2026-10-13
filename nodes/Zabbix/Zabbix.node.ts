@@ -10,6 +10,7 @@ import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { resourceOptions, resources } from './actions';
 import { loadOptionsMethods } from './methods/loadOptions';
+import { zabbixCredentialTest } from './transport';
 
 const resourceProperties = Object.values(resources).flatMap((module) => module.description);
 
@@ -21,7 +22,7 @@ export class Zabbix implements INodeType {
 		group: ['input'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-		description: 'Interact with the Zabbix 7.4 JSON-RPC API',
+		description: 'Interact with the Zabbix JSON-RPC API (7.x and 8.0)',
 		defaults: {
 			name: 'Zabbix',
 		},
@@ -32,6 +33,7 @@ export class Zabbix implements INodeType {
 			{
 				name: 'zabbixTokenApi',
 				required: true,
+				testedBy: 'zabbixApiCredentialTest',
 			},
 		],
 		properties: [
@@ -52,6 +54,7 @@ export class Zabbix implements INodeType {
 			string,
 			(this: ILoadOptionsFunctions) => Promise<INodePropertyOptions[]>
 		>,
+		credentialTest: { zabbixApiCredentialTest: zabbixCredentialTest },
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -81,7 +84,11 @@ export class Zabbix implements INodeType {
 				returnData.push(...results);
 			} catch (error) {
 				if (this.continueOnFail()) {
-					returnData.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
+					const { message, description } = error as Error & { description?: string };
+					returnData.push({
+						json: description ? { error: message, description } : { error: message },
+						pairedItem: { item: i },
+					});
 					continue;
 				}
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });

@@ -35,6 +35,7 @@ const TOKEN =
 }
 
 const { resources } = require(path.join(ROOT, 'dist/nodes/Zabbix/actions/index.js'));
+const { zabbixSend, senderTarget } = require('./zabbix-sender');
 const R = (r) => resources[r];
 
 function post(o) {
@@ -53,7 +54,7 @@ function post(o) {
 function ctx(params) {
 	return {
 		getCredentials: async () => ({ url: BASE, apiToken: TOKEN }),
-		getNode: () => ({ name: 'Zabbix' }),
+		getNode: () => ({ name: 'Zabbix' }), getTimezone: () => 'America/Sao_Paulo',
 		getMode: () => 'manual',
 		getWorkflowStaticData: () => ({}),
 		continueOnFail: () => false,
@@ -81,12 +82,19 @@ async function op(resource, operation, params, label, check) {
 		console.log(`  ✅ ${name}${out[0] !== undefined ? ' → ' + JSON.stringify(out[0]).slice(0, 90) : ''}`);
 		return out;
 	} catch (e) {
+		// The node correctly reported that this server version lacks the method.
+		if (/is not available on Zabbix/.test(e.message)) {
+			unavailable.add(key);
+			console.log(`  ⏭  ${name}: ${e.message}`);
+			return undefined;
+		}
 		fail++;
 		failures.push(`${name}: ${e.message} ${e.description ?? ''}`);
 		console.log(`  ❌ ${name}: ${e.message} ${e.description ? '| ' + String(e.description).slice(0, 160) : ''}`);
 		return undefined;
 	}
 }
+const unavailable = new Set(); // "resource.op" absent on this Zabbix version
 function skip(resource, operation, reason) {
 	skipped.set(`${resource}.${operation}`, reason);
 }
@@ -134,18 +142,31 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 	await op('hostgroup', 'propagate', { propagatePayload: JSON.stringify({ groups: [{ groupid: hg }], permissions: true, tag_filters: true }) });
 
 	console.log('\n--- itens/valores/tarefa ---');
-	const trapper = ids(await op('item', 'create', { name: 'zzz-full-trap', key_: 'zzz.full.trap', hostid: host, fields: { type: 2, value_type: 3 } }), 'itemids')[0];
+	const trapper = ids(await op('item', 'create', { name: 'zzz-full-trap', key_: 'zzz.full.trap', hostid: host, fields: { type: 2, value_type: 3, additionalParameters: '{"trapper_hosts":"0.0.0.0/0"}' } }), 'itemids')[0];
 	const internal = ids(await op('item', 'create', { name: 'zzz-full-uptime', key_: 'zabbix[uptime]', hostid: host, fields: { type: 5, value_type: 3, delay: '1m' } }, 'item.create (internal p/ task check-now)'), 'itemids')[0];
 	await op('item', 'getAll', { ...getCommon, itemids: '', hostids: [host], groupids: [], templateids: [] });
 	await op('item', 'update', { itemid: trapper, name: '', key_: '', hostid: '', fields: { history: '30d' } });
-	// push com retry (cache do server)
+	// push com retry (cache do server). history.push só existe a partir do 7.0;
+	// antes disso o valor entra pelo protocolo do zabbix_sender.
+	const injectValue = async (value) => {
+		try {
+			await R('history').handlers.push.call(ctx({ pushValues: JSON.stringify([{ itemid: Number(trapper), value }]) }), 0);
+			return 'push';
+		} catch (e) {
+			if (!/is not available on Zabbix/.test(e.message)) throw e;
+			unavailable.add('history.push');
+			if ((await zabbixSend(senderTarget(BASE), 'zzz-full-host', 'zzz.full.trap', value)) !== 1) throw new Error('sender: valor não processado (cache do server)');
+			return 'sender';
+		}
+	};
 	{
-		let ok = false, lastErr;
-		for (let a = 0; a < 15 && !ok; a++) {
-			try { await R('history').handlers.push.call(ctx({ pushValues: JSON.stringify([{ itemid: Number(trapper), value: '250' }]) }), 0); ok = true; }
+		let via, lastErr;
+		for (let a = 0; a < 15 && !via; a++) {
+			try { via = await injectValue('250'); }
 			catch (e) { lastErr = e; await sleep(6000); }
 		}
-		if (ok) { exercised.add('history.push'); pass++; console.log('  ✅ history.push (250)'); }
+		if (via === 'push') { exercised.add('history.push'); pass++; console.log('  ✅ history.push (250)'); }
+		else if (via === 'sender') console.log('  ⏭  history.push não existe nesta versão — valor injetado via zabbix_sender');
 		else { fail++; failures.push('history.push: ' + lastErr.message); console.log('  ❌ history.push: ' + lastErr.message); }
 	}
 	await sleep(5000);
@@ -161,7 +182,7 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 	// dispara: push > 100 de novo e espera o evento
 	let eventid;
 	for (let a = 0; a < 20 && !eventid; a++) {
-		try { await R('history').handlers.push.call(ctx({ pushValues: JSON.stringify([{ itemid: Number(trapper), value: String(300 + a) }]) }), 0); } catch {}
+		try { await injectValue(String(300 + a)); } catch {}
 		await sleep(4000);
 		try {
 			const probs = j(await R('problem').handlers.getAll.call(ctx({ eventids: '', groupids: [], hostids: [host], objectids: '', selects: [], output: 'extend', options: {} }), 0));
@@ -323,12 +344,12 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 	const tg2 = ids(await op('templategroup', 'create', { name: 'zzz-full-tg/sub', fields: {} }, 'templategroup.create (sub)'), 'groupids')[0];
 	await op('templategroup', 'getAll', { ...getCommon, groupids: [], nameSearch: 'zzz-full' });
 	await op('templategroup', 'update', { groupid: tg2, fields: { name: 'zzz-full-tg/sub2' } });
-	const tpl = ids(await op('template', 'create', { host: 'zzz-full-tpl', groups: tg, fields: {} }), 'templateids')[0];
-	const tpl2 = ids(await op('template', 'create', { host: 'zzz-full-tpl2', groups: tg, fields: {} }, 'template.create (2º p/ mass)'), 'templateids')[0];
+	const tpl = ids(await op('template', 'create', { host: 'zzz-full-tpl', groups: tg ?? hg, fields: {} }), 'templateids')[0];
+	const tpl2 = ids(await op('template', 'create', { host: 'zzz-full-tpl2', groups: tg ?? hg, fields: {} }, 'template.create (2º p/ mass)'), 'templateids')[0];
 	await op('template', 'getAll', { ...getCommon, templateids: [], groupids: [], hostids: [] });
 	await op('template', 'update', { templateid: tpl, fields: { description: 'e2e' } });
 	await op('template', 'massAdd', { massAddPayload: JSON.stringify({ templates: [{ templateid: tpl }], macros: [{ macro: '{$MASS}', value: '1' }] }) });
-	await op('template', 'massUpdate', { massUpdatePayload: JSON.stringify({ templates: [{ templateid: tpl }], groups: [{ groupid: tg }] }) });
+	await op('template', 'massUpdate', { massUpdatePayload: JSON.stringify({ templates: [{ templateid: tpl }], groups: [{ groupid: tg ?? hg }] }) });
 	await op('template', 'massRemove', { massRemovePayload: JSON.stringify({ templateids: [tpl], macros: ['{$MASS}'] }) });
 	await op('templategroup', 'massAdd', { massAddPayload: JSON.stringify({ groups: [{ groupid: tg2 }], templates: [{ templateid: tpl2 }] }) });
 	await op('templategroup', 'massRemove', { massRemovePayload: JSON.stringify({ groupids: [tg2], templateids: [tpl2] }) });
@@ -375,7 +396,15 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 
 	console.log('\n--- history.clear + deletes (ordem reversa) ---');
 	await op('history', 'clear', { clearItemids: trapper });
-	const del = (r, p) => op(r, 'delete', p);
+	// Nothing to delete when the create was unavailable on this version (or failed, already counted).
+	const del = (r, p) => {
+		const ids = String(Object.values(p)[0] ?? '').split(',').filter((v) => v && v !== 'undefined');
+		if (!ids.length) {
+			if (!exercised.has(`${r}.delete`)) skipped.set(`${r}.delete`, 'nada para apagar (criação indisponível ou falhou)');
+			return undefined;
+		}
+		return op(r, 'delete', p);
+	};
 	await del('maintenance', { maintenanceids: mnt });
 	await del('templatedashboard', { dashboardids: tdash });
 	await del('template', { templateids: [tpl, tpl2].join(',') });
@@ -415,6 +444,11 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 	await del('host', { hostids: host });
 	await del('hostgroup', { groupids: [hg, hg2].join(',') });
 
+	// Need a live problem / template layout — exercised by the dedicated suites.
+	for (const key of ['problem.getContext', 'host.getHealth']) skipped.set(key, 'coberto por e2e-trigger (problema real)');
+	for (const key of ['host.linkTemplates', 'host.unlinkTemplates', 'host.enable', 'host.disable'])
+		skipped.set(key, 'coberto por e2e-compat (estado verificado)');
+
 	// -------- cobertura --------
 	console.log('\n=== COBERTURA ===');
 	let total = 0, covered = 0, skippedCount = 0;
@@ -425,12 +459,12 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 			const key = `${rname}.${opName}`;
 			if (exercised.has(key)) covered++;
 			else if (skipped.has(key)) { skippedCount++; console.log(`  ⏭️  ${key} — ${skipped.get(key)}`); }
-			else missing.push(key);
+			else if (!unavailable.has(key)) missing.push(key);
 		}
 	}
-	console.log(`\nOperações: ${total} | exercitadas: ${covered} | skip justificado: ${skippedCount} | NÃO cobertas: ${missing.length}`);
+	console.log(`\nOperações: ${total} | exercitadas: ${covered} | skip justificado: ${skippedCount} | inexistentes nesta versão: ${unavailable.size} | NÃO cobertas: ${missing.length}`);
 	if (missing.length) missing.forEach((m) => console.log('  ⚠️  ' + m));
-	console.log(`\n=== RESULTADO: ${pass} ✅ | ${fail} ❌ ===`);
+	console.log(`\n=== RESULTADO: ${pass} ✅ | ${fail} ❌ | ${unavailable.size} ⏭ (não existem nesta versão) ===`);
 	if (failures.length) { console.log('FALHAS:'); failures.forEach((f) => console.log('  ✗ ' + f)); }
 	process.exit(fail || missing.length ? 1 : 0);
 })().catch((e) => { console.error('FATAL:', e); process.exit(1); });

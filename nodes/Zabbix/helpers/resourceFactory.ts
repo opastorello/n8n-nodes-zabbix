@@ -355,17 +355,34 @@ export function createCrudResource(config: ICrudResourceConfig): IZabbixResource
 	const primaryFields = config.writeFields.filter(isPrimary);
 	const additionalWriteFields = config.writeFields.filter((f) => !isPrimary(f));
 
-	const primaryFieldProps: INodeProperties[] = primaryFields.flatMap((field) => {
-		const cleanDescription = (field.description ?? '').replace(/\s*\(required on create\)/i, '');
-		return [
-			{ ...field, description: cleanDescription, required: true, displayOptions: showFor('create') },
-			{
-				...field,
-				description: `${cleanDescription} (leave empty to keep unchanged)`.trim(),
-				displayOptions: showFor('update'),
-			},
-		];
-	});
+	// A top-level field always yields its default, so on Update only fields whose
+	// default is blank can stay top-level; the rest (numbers, options) move into
+	// the collection, where they are sent only when the user adds them.
+	const hasBlankDefault = (f: INodeProperties) =>
+		f.default === '' ||
+		(Array.isArray(f.default) && f.default.length === 0) ||
+		(typeof f.default === 'object' &&
+			f.default !== null &&
+			!Array.isArray(f.default) &&
+			Object.keys(f.default).length === 0);
+	const updateTopLevelFields = primaryFields.filter(hasBlankDefault);
+	const updateCollectionFields = primaryFields.filter((f) => !hasBlankDefault(f));
+	const cleanDescription = (field: INodeProperties) =>
+		(field.description ?? '').replace(/\s*\(required on create\)/i, '');
+
+	const primaryFieldProps: INodeProperties[] = [
+		...primaryFields.map((field) => ({
+			...field,
+			description: cleanDescription(field),
+			required: true,
+			displayOptions: showFor('create'),
+		})),
+		...updateTopLevelFields.map((field) => ({
+			...field,
+			description: `${cleanDescription(field)} (leave empty to keep unchanged)`.trim(),
+			displayOptions: showFor('update'),
+		})),
+	];
 
 	const writeCollection: INodeProperties = {
 		displayName: 'Additional Fields',
@@ -374,7 +391,15 @@ export function createCrudResource(config: ICrudResourceConfig): IZabbixResource
 		placeholder: 'Add field',
 		default: {},
 		displayOptions: { show: { resource: [resource], operation: ['create', 'update'] } },
-		options: [...additionalWriteFields, additionalParametersField],
+		options: [
+			...additionalWriteFields,
+			...updateCollectionFields.map((field) => ({
+				...field,
+				description: cleanDescription(field),
+				displayOptions: { show: { '/operation': ['update'] } },
+			})),
+			additionalParametersField,
+		],
 	};
 
 	const getFilterFields: INodeProperties[] = [
@@ -442,7 +467,7 @@ export function createCrudResource(config: ICrudResourceConfig): IZabbixResource
 		// Collect top-level primary fields and the "Additional Fields" collection
 		// into a single object before applying JSON/relation transforms.
 		const parsed: IDataObject = {};
-		for (const field of primaryFields) {
+		for (const field of isUpdate ? updateTopLevelFields : primaryFields) {
 			const value = this.getNodeParameter(field.name, i, '');
 			if (value !== '' && value !== undefined && !(Array.isArray(value) && value.length === 0)) {
 				parsed[field.name] = value;
@@ -638,6 +663,12 @@ export interface IGetOnlyResourceConfig {
 	selects?: Array<{ name: string; value: string; description?: string }>;
 	/** Tune the shared Get Many fields (hide name search / minimal mode). */
 	getCommonOpts?: IGetCommonOpts;
+	/** Resource-specific fields shown on Get Many, read by `extendParams`. */
+	extraFields?: INodeProperties[];
+	/** Add resource-specific request parameters (after the common ones). */
+	extendParams?: (this: IExecuteFunctions, itemIndex: number, params: IDataObject) => void;
+	/** Post-process the raw result (enrichment, simplification). */
+	transformResult?: (this: IExecuteFunctions, itemIndex: number, result: unknown) => Promise<unknown>;
 }
 
 /**
@@ -682,6 +713,7 @@ export function createGetOnlyResource(config: IGetOnlyResourceConfig): IZabbixRe
 					} as INodeProperties,
 				]
 			: []),
+		...(config.extraFields ?? []).map((field) => ({ ...field, displayOptions: showFor })),
 		...getCommonDescription(resource, 'getAll', config.getCommonOpts),
 	];
 
@@ -700,7 +732,9 @@ export function createGetOnlyResource(config: IGetOnlyResourceConfig): IZabbixRe
 			const selects = this.getNodeParameter('selects', i, []) as string[];
 			for (const select of selects) params[select] = 'extend';
 
-			const result = await zabbixApiRequest.call(this, `${apiObject}.get`, params);
+			config.extendParams?.call(this, i, params);
+			let result = await zabbixApiRequest.call(this, `${apiObject}.get`, params);
+			if (config.transformResult) result = await config.transformResult.call(this, i, result);
 			return wrapZabbixResult(result, i);
 		},
 	};

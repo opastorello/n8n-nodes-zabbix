@@ -1,6 +1,6 @@
 // E2E write-suite (run against a DISPOSABLE Zabbix — creates and deletes objects!):
 // 1. docker compose -f test/docker-compose.zabbix.yml up -d
-// 2. create an API token (Admin/zabbix) and export ZABBIX_TOKEN
+// 2. export ZABBIX_TOKEN=$(node test/create-token.js http://127.0.0.1:8089)
 // 3. npm run build && npm run test:e2e
 // Exercises the node's COMPILED handlers against a disposable
 // Zabbix 7.4 in Docker. Full lifecycle: create → get(filtered) → update →
@@ -46,7 +46,7 @@ function post(o) {
 function ctx(params) {
 	return {
 		getCredentials: async () => ({ url: BASE, apiToken: TOKEN }),
-		getNode: () => ({ name: 'Zabbix' }),
+		getNode: () => ({ name: 'Zabbix' }), getTimezone: () => 'America/Sao_Paulo',
 		getMode: () => 'manual',
 		getWorkflowStaticData: () => ({}),
 		continueOnFail: () => false,
@@ -55,7 +55,7 @@ function ctx(params) {
 	};
 }
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, unavailable = 0;
 const failures = [];
 async function step(name, fn) {
 	try {
@@ -64,6 +64,12 @@ async function step(name, fn) {
 		console.log(`  ✅ ${name}${out !== undefined ? ' → ' + JSON.stringify(out).slice(0, 100) : ''}`);
 		return out;
 	} catch (e) {
+		// The node correctly reported that this server version lacks the method.
+		if (/is not available on Zabbix/.test(e.message)) {
+			unavailable++;
+			console.log(`  ⏭  ${name}: ${e.message}`);
+			return undefined;
+		}
 		fail++;
 		failures.push(`${name}: ${e.message}`);
 		console.log(`  ❌ ${name}: ${e.message}`);
@@ -134,20 +140,24 @@ const j = (rows) => rows.map((r) => r.json);
 	const item = await step('item.create (trapper + tags)', async () => {
 		const out = j(await R('item').handlers.create.call(ctx({
 			name: 'zzz-e2e-metric', key_: 'e2e.metric', hostid: host,
-			fields: { type: 2, value_type: 3, tags: { tagItems: [{ tag: 'component', value: 'e2e' }] } },
+			fields: { type: 2, value_type: 3, additionalParameters: '{"trapper_hosts":"0.0.0.0/0"}', tags: { tagItems: [{ tag: 'component', value: 'e2e' }] } },
 		}), 0));
 		return out[0].itemids[0];
 	});
-	await step('history.push (injeta valor; espera cache do server)', async () => {
+	const pushed = await step('history.push (injeta valor; espera cache do server)', async () => {
 		let lastErr;
 		for (let attempt = 0; attempt < 15; attempt++) {
 			try {
 				return j(await R('history').handlers.push.call(ctx({ pushValues: JSON.stringify([{ itemid: Number(item), value: '123' }]) }), 0))[0];
-			} catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 6000)); }
+			} catch (e) {
+				lastErr = e;
+				if (/is not available on Zabbix/.test(e.message)) break;
+				await new Promise((r) => setTimeout(r, 6000));
+			}
 		}
 		throw lastErr;
 	});
-	await step('history.get (lê o valor de volta)', async () => {
+	if (pushed !== undefined) await step('history.get (lê o valor de volta)', async () => {
 		await new Promise((r) => setTimeout(r, 8000)); // dá tempo do server processar
 		const out = j(await R('history').handlers.getAll.call(ctx({ history: 3, itemids: item, time_from: 0, time_till: 0, output: 'extend', options: {} }), 0));
 		if (!out.length) throw new Error('sem valores (server pode demorar; não-fatal)');
@@ -167,7 +177,7 @@ const j = (rows) => rows.map((r) => r.json);
 		j(await R('templategroup').handlers.create.call(ctx({ name: 'zzz-e2e-tgroup', fields: {} }), 0))[0].groupids[0]);
 	const tpl = await step('template.create (groups relation + macros fc)', async () =>
 		j(await R('template').handlers.create.call(ctx({
-			host: 'zzz-e2e-template', groups: tg,
+			host: 'zzz-e2e-template', groups: tg ?? hg,
 			fields: { macros: { macroItems: [{ macro: '{$TPL}', value: '1' }] } },
 		}), 0))[0].templateids[0]);
 
@@ -225,7 +235,7 @@ const j = (rows) => rows.map((r) => r.json);
 	await step('script.delete', async () => j(await R('script').handlers.delete.call(ctx({ scriptids: scr }), 0))[0]);
 	await step('host.delete', async () => j(await R('host').handlers.delete.call(ctx({ hostids: host }), 0))[0]);
 	await step('template.delete', async () => j(await R('template').handlers.delete.call(ctx({ templateids: tpl }), 0))[0]);
-	await step('templategroup.delete', async () => j(await R('templategroup').handlers.delete.call(ctx({ groupids: tg }), 0))[0]);
+	if (tg !== undefined) await step('templategroup.delete', async () => j(await R('templategroup').handlers.delete.call(ctx({ groupids: tg }), 0))[0]);
 	await step('hostgroup.delete', async () => j(await R('hostgroup').handlers.delete.call(ctx({ groupids: hg }), 0))[0]);
 	await step('usermacro.deleteglobal', async () => j(await R('usermacro').handlers.delete.call(ctx({ globalmacroids: gm }), 0))[0]);
 
@@ -236,6 +246,6 @@ const j = (rows) => rows.map((r) => r.json);
 		return 0;
 	});
 
-	console.log(`\n=== RESULTADO: ${pass} ✅ | ${fail} ❌ ===`);
+	console.log(`\n=== RESULTADO: ${pass} ✅ | ${fail} ❌ | ${unavailable} ⏭ (não existem nesta versão) ===`);
 	if (failures.length) { console.log('FALHAS:'); failures.forEach((f) => console.log('  ✗ ' + f)); process.exit(1); }
 })().catch((e) => { console.error('ERRO FATAL:', e); process.exit(1); });

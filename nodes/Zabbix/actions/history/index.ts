@@ -134,14 +134,16 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 			.map((entry, index) => (entry?.error ? `value #${index + 1}: ${entry.error}` : null))
 			.filter((entry): entry is string => entry !== null);
 		if (valueErrors.length) {
+			const firstReason = valueErrors[0].replace(/^value #\d+: /, '');
+			const hint = /allowed hosts/i.test(valueErrors.join(' '))
+				? "Add the Zabbix frontend's IP (or 0.0.0.0/0 to allow any) to the item's \"Allowed hosts\" (trapper_hosts) — Zabbix 8.0 enforces it for API pushes."
+				: 'Values are only accepted for existing trapper/HTTP items — note the Zabbix server config cache may take up to a minute to pick up newly created items.';
 			throw new NodeOperationError(
 				this.getNode(),
-				`history.push rejected ${valueErrors.length} value(s)`,
+				`history.push rejected ${valueErrors.length} value(s): ${firstReason}`,
 				{
 					itemIndex: i,
-					description:
-						valueErrors.join('; ') +
-						'. Values are only accepted for existing trapper/HTTP items — note the Zabbix server config cache may take up to a minute to pick up newly created items.',
+					description: `${valueErrors.join('; ')}. ${hint}`,
 				},
 			);
 		}

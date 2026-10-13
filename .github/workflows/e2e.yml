@@ -1,0 +1,82 @@
+name: E2E (live Zabbix)
+
+# Runs every live suite against disposable Zabbix containers: 7.0 LTS, the
+# current release and the development branch (the upcoming 8.0), so API
+# changes show up here before users hit them. Methods a version doesn't have
+# are reported as skipped, not failed.
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - zabbix: alpine-7.0-latest
+            prerelease: false
+          - zabbix: alpine-7.4-latest
+            prerelease: false
+          - zabbix: alpine-trunk
+            prerelease: true
+    name: Zabbix ${{ matrix.zabbix }}
+    # The development branch can break on its own; report it without blocking.
+    continue-on-error: ${{ matrix.prerelease }}
+    env:
+      ZABBIX_TAG: ${{ matrix.zabbix }}
+      ZABBIX_URL: http://127.0.0.1:8089
+      ZABBIX_SERVER_PORT: '10151'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start Zabbix
+        run: docker compose -f test/docker-compose.zabbix.yml up -d
+
+      - name: Create API token
+        run: |
+          set -e
+          TOKEN="$(node test/create-token.js "$ZABBIX_URL")"
+          echo "::add-mask::$TOKEN"
+          echo "ZABBIX_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: E2E — write lifecycle
+        run: npm run test:e2e
+
+      - name: E2E — all operations
+        run: npm run test:e2e:full
+
+      - name: E2E — trigger
+        run: npm run test:e2e:trigger
+
+      - name: E2E — cross-version compatibility
+        run: npm run test:e2e:compat
+
+      - name: Zabbix logs on failure
+        if: failure()
+        run: docker compose -f test/docker-compose.zabbix.yml logs --tail=200 zabbix-server zabbix-web

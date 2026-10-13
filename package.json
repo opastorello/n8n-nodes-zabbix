@@ -38,7 +38,11 @@
 		"release": "n8n-node release",
 		"prepublishOnly": "n8n-node prerelease",
 		"test:smoke": "node test/smoke.js",
-		"test:e2e": "node test/e2e.js"
+		"test:e2e": "node test/e2e.js",
+		"test:e2e:full": "node test/e2e-full.js",
+		"test:e2e:trigger": "node test/e2e-trigger.js",
+		"test:e2e:compat": "node test/e2e-compat.js",
+		"test:token": "node test/create-token.js"
 	},
 	"files": [
 		"dist"

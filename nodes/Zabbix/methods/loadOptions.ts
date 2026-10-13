@@ -83,8 +83,8 @@ export async function getOutputFields(
 				.map((key) => ({ name: key, value: key }));
 		}
 	} catch {
-		// No permission / no objects yet / method has no output — fall back to
-		// the free-text override so the user is never blocked.
+		// No permission / no objects yet / method has no output — the user can
+		// still supply field names through an expression.
 	}
 	return [];
 }

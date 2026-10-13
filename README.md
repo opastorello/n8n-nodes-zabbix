@@ -1,11 +1,11 @@
 # n8n-nodes-zabbix
 
-An [n8n](https://n8n.io) community node package for the **Zabbix JSON-RPC API** (built and tested against **Zabbix 7.4**). It ships two nodes:
+An [n8n](https://n8n.io) community node package for the **Zabbix JSON-RPC API**, tested live against **Zabbix 7.4** and the **Zabbix 8.0** development branch (see [Version compatibility](#version-compatibility)). It ships two nodes:
 
 - **Zabbix** — action node with **60 resources / 223 operations** covering the full Zabbix API (hosts, items, triggers, problems, events, templates, maintenances, users, dashboards, scripts, configuration import/export, and more).
-- **Zabbix Trigger** — a polling trigger that starts your workflow when a **new problem** or **new event** appears in Zabbix.
+- **Zabbix Trigger** — a polling trigger that starts your workflow when a **problem opens**, a **problem resolves**, or any **new event** appears in Zabbix.
 
-Both nodes are marked `usableAsTool`, so an **n8n AI Agent** can call them as tools ("list the disaster-severity problems", "acknowledge event 9001", …).
+The **Zabbix** node is marked `usableAsTool`, so an **n8n AI Agent** can call it as a tool ("list the disaster-severity problems", "acknowledge event 9001", …).
 
 ## Table of contents
 
@@ -20,6 +20,7 @@ Both nodes are marked `usableAsTool`, so an **n8n AI Agent** can call them as to
 - [Using with AI Agents](#using-with-ai-agents)
 - [Example workflows](#example-workflows)
 - [Resource reference](#resource-reference)
+- [Version compatibility](#version-compatibility)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -31,16 +32,21 @@ For local development see [Development](#development).
 
 ## Credentials
 
-Create a **Zabbix Token API** credential:
+Create a **Zabbix API** credential:
 
 | Field | Value |
 |---|---|
-| **Zabbix URL** | Base URL of the Zabbix frontend, e.g. `https://zabbix.example.com` or `https://example.com/zabbix`. Do **not** include `/api_jsonrpc.php` — it is appended automatically. |
-| **API Token** | An API token created in Zabbix under **Users → API tokens** (Zabbix 5.4+). Sent as an `Authorization: Bearer` header. |
+| **Zabbix URL** | Base URL of the Zabbix frontend, e.g. `https://zabbix.example.com` or `https://example.com/zabbix`. `/api_jsonrpc.php` is appended automatically (if you paste it anyway, it is ignored). |
+| **Authentication** | **API Token** (recommended; Users → API tokens, Zabbix 5.4+) or **Username & Password** (logs in with `user.login`, reuses the session and logs in again when it expires). |
+| **Read-Only** | Blocks every method that changes Zabbix (create, update, delete, acknowledge, execute, push, …) inside the node, before anything is sent. Use it for AI-agent tools and reporting workflows. |
+| **Extra Headers (JSON)** | Headers sent with every request, for a proxy or **Cloudflare Access** in front of Zabbix, e.g. `{"CF-Access-Client-Id":"…","CF-Access-Client-Secret":"…"}`. |
+| **Ignore SSL Issues (Insecure)** | Turn on for an internal Zabbix with a self-signed or private-CA certificate. Leave off otherwise. |
 
-Clicking **Save** runs a connection test (a lightweight authenticated `host.get`). A green check means both the URL and the token are valid. An *"Invalid Zabbix API token or URL"* error means the token was rejected.
+The node detects the Zabbix version once per URL and sends the credential the way that version expects — in the request body before 6.4, as an `Authorization: Bearer` header from 6.4 on (7.2 removed the body field).
 
-> **Tip:** create a dedicated Zabbix user with a role limited to what your workflows need, and generate the token for that user. Read-only workflows should use a read-only token.
+Clicking **Save** runs a connection test that reports the version it found (*"Connected to Zabbix 7.4.15 (read-only)"*), or the exact reason it failed.
+
+> **Tip:** create a dedicated Zabbix user with a role limited to what your workflows need. Turn on **Read-Only** for anything an AI agent can call.
 
 ## The Zabbix node
 
@@ -67,7 +73,7 @@ Resource `Host` → Operation `Get Many` → pick the group in **Host Group Name
 ### Creating and updating objects
 
 - **Create** shows the **required fields at the top** (marked with `*`). Example: *Host → Create* asks for Technical Name, Group IDs and Interfaces.
-- **Update** asks for the object **ID** plus the same fields as optional ("leave empty to keep unchanged").
+- **Update** asks for the object **ID** and sends **only what you fill in**. Text fields from Create appear as optional ("leave empty to keep unchanged"); number/choice fields (e.g. a map's width, an SLA's period) are under **Additional Fields**, so an update never resets them to defaults.
 - **Additional Fields** holds every optional typed property.
 - **Structured editors instead of JSON** for the common nested inputs:
   - **Host Interfaces** — "Add Interface" rows with Type (Agent/SNMP/IPMI/JMX), Connect Via (the IP or DNS field appears accordingly), Port with the right default, and SNMP details only for SNMP.
@@ -82,6 +88,16 @@ Resource `Host` → Operation `Create` → Technical Name `web-01`, Group IDs `2
 ### Deleting objects
 
 *Delete* takes a comma-separated list of IDs and removes all of them in one call. **This is irreversible** — test with *Get Many* first to confirm you have the right IDs.
+
+### NOC operations
+
+Built for triage — each one makes several API calls and returns a single result, so an alert, ticket or AI agent gets everything in one step:
+
+- **Problem → Get Context** (by `eventid`) — the problem; the trigger with expanded name and expression, its dependencies and the **last values of its items**; the host with groups, interfaces (availability), tags, inventory and proxy; **maintenance** status; **recurrence** (occurrences in 24 h / 7 d and a verdict: *new*, *recurring* or *chronic*); the host's other events in the last 24 h; acknowledgements; and the link.
+- **Host → Get Health Snapshot** — per host: interface availability, open problems by severity and the 5 oldest, items **without data** (older than *Stale After*) and unsupported items with their errors, proxy last-seen and health, maintenance, link.
+- **Problem → Get Many** — filters for **minimum severity**, acknowledged, suppressed and recently resolved. Every row gets `hosts` (which `problem.get` can't return by itself), `severity_name`, `event_url`, `since` (ISO), `since_local` (workflow time zone) and `duration_seconds`. **Simplify** returns just `name, severity, severity_name, host, since, duration_seconds, acknowledged, suppressed, tags, url`.
+- **Host → Link Templates / Unlink Templates** — *adds* templates (`host.massadd`) without touching the ones already linked; unlink optionally clears what the templates created. Use these instead of **Update**, where the Templates field **replaces** the whole list (the node shows a warning there).
+- **Host → Enable / Disable** — for one or many hosts in one call.
 
 ### Special operations
 
@@ -100,25 +116,55 @@ Starts a workflow when something new happens in Zabbix (polling — configure th
 
 | Field | What it does |
 |---|---|
-| **Trigger On** | *New Problem* (`problem.get`) or *New Event* (`event.get`). |
-| **Host Group Names or IDs** | Only fire for these groups (empty = all). Loaded live from Zabbix. |
-| **Minimum Severity** | Problems only: fire at or above this severity (e.g. *High* fires for High + Disaster). |
-| **Additional Filters (JSON)** | Optional raw parameters merged into the poll request (e.g. `{"tags":[{"tag":"env","value":"prod"}]}`). |
+| **Trigger On** | *New Problem* — a trigger went into problem state (fires even if it already resolved before the poll). *Problem Resolved* — a problem recovered; the original problem is attached. *New Event (Any Source)* — every event, including discovery, autoregistration and internal events. |
+| **Host Group Names or IDs** / **Host Names or IDs** | Only fire for these groups / hosts (empty = all). Loaded live from Zabbix. |
+| **Minimum Severity** | Problem modes: fire at or above this severity (e.g. *High* fires for High + Disaster). For *Problem Resolved* it applies to the trigger's severity. |
+| **Ignore Suppressed** | Skip problems suppressed by a maintenance (hosts in maintenance) or by a manual suppress. |
+| **Name Matches / Name Excludes (Regex)** | Only fire for (or skip) event names matching a regular expression; prefix `(?i)` for case-insensitive. |
+| **Additional Filters (JSON)** | Optional raw `event.get` parameters merged into the poll request (e.g. `{"tags":[{"tag":"env","value":"prod"}]}`). Invalid JSON stops the trigger with an error instead of being silently ignored. |
 
-**Exactly-once delivery:** the node keeps a watermark on the highest event ID it has seen. The first poll only establishes the watermark (no replay of old problems); each subsequent new problem/event fires exactly once, emitted oldest-first. *Test workflow* (manual run) shows the latest problem so you can build the downstream mapping.
+Every emitted event is ready to drop into an alert or ticket:
+
+| Field | Content |
+|---|---|
+| `name`, `severity`, `clock`, `tags`, … | The raw Zabbix event. |
+| `hosts` | `[{hostid, host, name}]` of the affected host(s). |
+| `severity_name` | *Not classified* … *Disaster* (problem modes). |
+| `event_url` | Link to the problem in the Zabbix frontend. |
+| `since`, `since_local` | When it happened: ISO (UTC) and in the workflow's time zone. |
+| `relatedObject` | The trigger (`triggerid`, `description`, `priority`, `comments`) — problem modes. |
+| `problem`, `duration_seconds` | *Problem Resolved* only: the original problem event and how long it lasted. Use `problem.eventid` to find and close the ticket you opened. |
+
+**Exactly-once delivery:** the node keeps a watermark on the highest event ID it has seen and pages forward from it on each poll (up to 1,000 events per poll; a larger burst continues on the next poll — nothing is dropped). The first poll only establishes the watermark (no replay of old problems); each later event fires exactly once, oldest first. *Test workflow* (manual run) shows the latest matching event without moving the watermark.
 
 ## Using with AI Agents
 
-Both nodes have `usableAsTool: true`. Attach the **Zabbix** node as a tool of an **AI Agent** and the model can query and act on Zabbix by itself:
+The Zabbix node has `usableAsTool: true`. Attach it as a tool of an **AI Agent** and the model can query and act on Zabbix by itself:
 
 > *"Which hosts have disaster-severity problems right now? Acknowledge the ones on the staging group."*
 
-The agent will call *Problem → Get Many* (severity filter), *Host → Get Many* and *Event → Acknowledge* as needed. Combine with the **Zabbix Trigger** to build a NOC auto-triage loop: new problem → agent enriches (host, items, history) → decides → acknowledges/runs a script/notifies.
+The agent will call *Problem → Get Many* (severity filter), *Host → Get Many* and *Event → Acknowledge* as needed. Prefer **Problem → Get Context** and **Host → Get Health Snapshot** as the agent's tools: one call instead of eight, and far fewer tokens. Use a **Read-Only** credential for agents that should only look.
+
+**Triage workflow with Get Context:**
+
+```
+Zabbix Trigger (New Problem, severity ≥ Average, Ignore Suppressed)
+  → Zabbix: Problem → Get Context   (Event ID = {{ $json.eventid }})
+  → IF {{ $json.recurrence.verdict }} is "chronic"
+       true  → Zabbix: Event → Acknowledge ("known chronic issue, see ticket")
+       false → AI Agent / Chat message with {{ $json.summary }},
+               in maintenance: {{ $json.in_maintenance }},
+               last value: {{ $json.trigger.items[0].lastvalue }} {{ $json.trigger.items[0].units }},
+               link: {{ $json.url }}
+```
 
 ## Example workflows
 
 **1. Alert routing (NOC):**
-`Zabbix Trigger (New Problem, severity ≥ High)` → `Slack/Teams/Email` with `{{$json.name}}` and `{{$json.severity}}`.
+`Zabbix Trigger (New Problem, severity ≥ High)` → `Slack/Teams/Email` with `{{$json.severity_name}}: {{$json.name}} on {{$json.hosts[0].name}}` and a link to `{{$json.event_url}}`.
+
+**1b. Ticket lifecycle:**
+`Zabbix Trigger (New Problem)` → create a ticket storing `{{$json.eventid}}`; a second `Zabbix Trigger (Problem Resolved)` → find the ticket by `{{$json.problem.eventid}}` and close it with the downtime `{{$json.duration_seconds}}`.
 
 **2. Auto-acknowledge known noise:**
 `Zabbix Trigger (New Problem)` → `IF name contains "ICMP ping loss"` → `Zabbix: Event → Acknowledge` (action *Acknowledge* + *Add Message* "auto-ack: transient link noise").
@@ -214,15 +260,34 @@ All 60 resources and their operations (each maps to the same-named `object.metho
 
 Method coverage vs the Zabbix 7.4 specification: **223 of 226** methods are exposed as typed operations. The remaining 3 are intentional: `user.login` (replaced by the token credential) and host-level `usermacro.create/update/delete` (managed through the **Host** resource's Macros field; the **Global Macro** resource covers the global variants).
 
+## Version compatibility
+
+| Zabbix | Status |
+|---|---|
+| **7.0 LTS, 7.2, 7.4** | Fully supported; all live suites pass (7.0 and 7.4 in CI). On 7.0/7.2 the two Discovery Rule Prototype operations report *"not available on Zabbix 7.x"* — that object was added in 7.4. |
+| **8.0** (development branch, reports `8.0.0`) | All live suites pass, in CI too. 8.0 is not released yet, so its API can still change. |
+| 6.0 / 6.4 | Best effort, not in CI. Connecting works (the token goes in the request body before 6.4) and the common CRUD, problem and host operations pass; objects added in 6.2+/7.0+ report *"not available"*. The Zabbix Trigger is not validated on 6.x. |
+
+When a method doesn't exist on your version, the node says so — *"templategroup.create is not available on Zabbix 6.0.48"* — instead of a bare "Method not found".
+
+What changes on 8.0 and how the node handles it:
+
+- **`host`, `template`, `hostgroup` and `templategroup.massupdate` were removed.** The node detects 8.0 (one `apiinfo.version` call per Zabbix URL) and rebuilds them, so the **Mass Update** operations — and a **Custom API Call** to those methods — keep working with the same result. Host/template mass update becomes a single `update` call; host/template group mass update becomes a `massadd` followed by a `massremove`, which is **not atomic** (if the removal fails, the additions stay).
+- **`history.push` requires the item's *Allowed hosts*** (`trapper_hosts`) to include the Zabbix frontend's IP; otherwise every value is rejected with *"Client IP is not in item's allowed hosts list."*.
+- **New 8.0 objects** (`apmtrace`, `apmspan`, `apmlog`, `apmmetric`, `ceprule`, `device`, `serverinfo`) are reachable through **Custom API Call**. Typed resources for them will follow once 8.0 is released and the API is final.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
+| *"history.push rejected … Client IP is not in item's allowed hosts list"* | Zabbix 8.0 enforces the trapper item's **Allowed hosts** for API pushes. Add the frontend's IP (or `0.0.0.0/0`) to the item's `trapper_hosts`. |
 | Credential test fails with *"Invalid Zabbix API token or URL"* | Token revoked/expired/mistyped, or the URL doesn't point at the Zabbix frontend. Confirm `https://<url>/api_jsonrpc.php` answers and regenerate the token under **Users → API tokens**. |
 | `Not authorised` / `Session terminated, re-login` on execution | The token was rejected. Rotate it in Zabbix and update the credential. |
 | A dropdown ("… Names or IDs") is empty | The token's user can't see those objects (Zabbix permissions), or the connection failed — check the credential test. |
 | `Invalid params.` with details | Zabbix rejected a parameter; the error description echoes the API's exact complaint (e.g. a required property missing in a JSON field). Compare with the [Zabbix API docs](https://www.zabbix.com/documentation/current/en/manual/api) for that object. |
 | Trigger never fires | It only emits problems/events **newer than the first poll**. Cause a new problem (or lower the severity filter) and wait for the next poll interval. |
+| *"Could not reach the Zabbix API"* with `self signed certificate` / `unable to verify the first certificate` | The Zabbix frontend uses a self-signed or private-CA certificate. Turn on **Ignore SSL Issues** in the credential. |
+| *"The URL did not return a Zabbix API response"* | The URL answers but isn't the Zabbix frontend (e.g. a login portal or a proxy page). Point it at the directory that contains `api_jsonrpc.php`. |
 | `apiinfo.version` errors about the authorization header | Fixed in this node (the version call is sent unauthenticated, as Zabbix requires). Update the package if you see this. |
 
 ## Development
@@ -240,13 +305,26 @@ npm run build   # compile to dist/
 npm run build && npm run test:smoke   # all 223 operations against a mocked transport (no server needed)
 ```
 
-End-to-end suite against a **disposable** Zabbix 7.4 (creates and deletes real objects — never point it at production):
+End-to-end suites against a **disposable** Zabbix (they create and delete real objects and refuse non-local URLs — never point them at production):
 
 ```bash
 docker compose -f test/docker-compose.zabbix.yml up -d   # Zabbix 7.4 at http://localhost:8089 (Admin/zabbix)
-# create an API token in the UI (or via user.login + token.create), then:
-ZABBIX_TOKEN=<token> npm run test:e2e
+export ZABBIX_URL=http://127.0.0.1:8089
+export ZABBIX_TOKEN=$(npm run -s test:token -- $ZABBIX_URL)   # waits for Zabbix, logs in as Admin, prints a token
+npm run test:e2e           # write lifecycle
+npm run test:e2e:full      # every operation
+npm run test:e2e:trigger   # polling trigger: problem → resolved, exactly-once
+npm run test:e2e:compat    # *.massupdate gives the same result on 7.4 and 8.0
 ```
+
+Another version side by side, e.g. the 8.0 development branch on port 8090:
+
+```bash
+ZABBIX_TAG=alpine-trunk ZABBIX_WEB_PORT=8090 ZABBIX_SERVER_PORT=10152 \
+  docker compose -p zabbix-node-test-trunk -f test/docker-compose.zabbix.yml up -d
+```
+
+CI (`.github/workflows/e2e.yml`) runs all four suites against 7.4 and the development branch on every PR and weekly.
 
 The e2e suite covers the full lifecycle — host group/host/item/trigger/template create, filtered gets, dynamic dropdowns, tag/macro/interface structured fields, history push+get, mass add, maintenance with time periods, script execute helpers, configuration export, and deletes everything it created.
 

@@ -1,14 +1,10 @@
-import type {
-	Icon,
-	ICredentialTestRequest,
-	ICredentialType,
-	INodeProperties,
-} from 'n8n-workflow';
+import type { Icon, ICredentialType, INodeProperties } from 'n8n-workflow';
 
 export class ZabbixTokenApi implements ICredentialType {
+	// Internal name kept from the token-only release so saved credentials keep working.
 	name = 'zabbixTokenApi';
 
-	displayName = 'Zabbix Token API';
+	displayName = 'Zabbix API';
 
 	icon: Icon = { light: 'file:../icons/zabbix.svg', dark: 'file:../icons/zabbix.dark.svg' };
 
@@ -23,9 +19,27 @@ export class ZabbixTokenApi implements ICredentialType {
 			default: '',
 			required: true,
 			placeholder: 'https://zabbix.example.com/zabbix',
-			hint: 'Just the frontend base URL — do not include /api_jsonrpc.php',
+			hint: 'The frontend base URL — /api_jsonrpc.php is appended automatically',
 			description:
-				'Base URL of the Zabbix frontend (without <code>/api_jsonrpc.php</code>, which is appended automatically)',
+				'Base URL of the Zabbix frontend. <code>/api_jsonrpc.php</code> is appended automatically (and ignored if you include it).',
+		},
+		{
+			displayName: 'Authentication',
+			name: 'authentication',
+			type: 'options',
+			default: 'apiToken',
+			options: [
+				{
+					name: 'API Token',
+					value: 'apiToken',
+					description: 'Recommended. Create one under Users → API tokens (Zabbix 5.4+).',
+				},
+				{
+					name: 'Username & Password',
+					value: 'password',
+					description: 'Logs in with user.login and reuses the session until it expires',
+				},
+			],
 		},
 		{
 			displayName: 'API Token',
@@ -34,43 +48,55 @@ export class ZabbixTokenApi implements ICredentialType {
 			typeOptions: { password: true },
 			default: '',
 			required: true,
+			description: 'API token created in Zabbix under Users → API tokens',
+			displayOptions: { show: { authentication: ['apiToken'] } },
+		},
+		{
+			displayName: 'Username',
+			name: 'username',
+			type: 'string',
+			default: '',
+			required: true,
+			displayOptions: { show: { authentication: ['password'] } },
+		},
+		{
+			displayName: 'Password',
+			name: 'password',
+			type: 'string',
+			typeOptions: { password: true },
+			default: '',
+			required: true,
+			displayOptions: { show: { authentication: ['password'] } },
+		},
+		{
+			displayName: 'Read-Only',
+			name: 'readOnly',
+			type: 'boolean',
+			default: false,
 			description:
-				'API token created in Zabbix under Users → API tokens (Zabbix 5.4+). Sent as an <code>Authorization: Bearer</code> header.',
+				'Whether to block every method that changes Zabbix (create, update, delete, acknowledge, execute, push, …). Use it for AI-agent tools and reporting workflows.',
+		},
+		{
+			displayName: 'Extra Headers (JSON)',
+			name: 'extraHeaders',
+			type: 'string',
+			typeOptions: { password: true },
+			default: '',
+			placeholder: '{"CF-Access-Client-Id": "…", "CF-Access-Client-Secret": "…"}',
+			description:
+				'Headers sent with every request — for a proxy or Cloudflare Access in front of Zabbix. JSON object.',
+		},
+		{
+			displayName: 'Ignore SSL Issues (Insecure)',
+			name: 'ignoreSslIssues',
+			type: 'boolean',
+			default: false,
+			description:
+				'Whether to connect even if the TLS certificate cannot be validated (e.g. a self-signed certificate on an internal Zabbix)',
 		},
 	];
 
-	// No generic `authenticate` block: the token is attached manually in the
-	// node transport. This keeps n8n from injecting a "Custom API Call" operation
-	// into every resource (which only appears for generic-auth credentials).
-
-	// A lightweight authenticated `host.get` verifies both connectivity and that
-	// the token is valid. (`apiinfo.version` can't be used here — Zabbix rejects
-	// it when an Authorization header is present.)
-	test: ICredentialTestRequest = {
-		request: {
-			baseURL: '={{$credentials.url.replace(new RegExp("/$"), "")}}',
-			url: '/api_jsonrpc.php',
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json-rpc',
-				Authorization: '=Bearer {{$credentials.apiToken}}',
-			},
-			body: {
-				jsonrpc: '2.0',
-				method: 'host.get',
-				params: { output: ['hostid'], limit: 1 },
-				id: 1,
-			},
-		},
-		rules: [
-			{
-				type: 'responseSuccessBody',
-				properties: {
-					key: 'error.code',
-					value: -32602,
-					message: 'Invalid Zabbix API token or URL',
-				},
-			},
-		],
-	};
+	// No generic `authenticate` block: the transport attaches the token itself
+	// (as a header or, before Zabbix 6.4, in the request body). The connection
+	// test lives in the nodes (`testedBy`) so it shares that logic.
 }

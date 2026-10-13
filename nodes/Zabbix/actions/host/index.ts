@@ -15,7 +15,8 @@ import {
 	wrapZabbixResult,
 } from '../../helpers/utils';
 import { buildCommonGetParams, getCommonDescription } from '../../descriptions/getCommon.description';
-import { zabbixApiRequest } from '../../transport';
+import { asRows, enrichEvent, localTime, severityName, simplifyEvent } from '../../helpers/eventFormat';
+import { zabbixApiRequest, zabbixBaseUrl } from '../../transport';
 
 const resource = 'host';
 
@@ -44,10 +45,35 @@ const operationSelect: INodeProperties = {
 			description: 'Permanently delete one or more hosts by ID',
 		},
 		{
+			name: 'Disable',
+			value: 'disable',
+			action: 'Disable hosts',
+			description: 'Stop monitoring one or more hosts (status: unmonitored)',
+		},
+		{
+			name: 'Enable',
+			value: 'enable',
+			action: 'Enable hosts',
+			description: 'Resume monitoring one or more hosts (status: monitored)',
+		},
+		{
+			name: 'Get Health Snapshot',
+			value: 'getHealth',
+			action: 'Get a health snapshot of hosts',
+			description:
+				'Interface availability, open problems, items without data, proxy health and maintenance — one result per host',
+		},
+		{
 			name: 'Get Many',
 			value: 'getAll',
 			action: 'Get many hosts',
 			description: 'Retrieve hosts, with optional group/template/name filters',
+		},
+		{
+			name: 'Link Templates',
+			value: 'linkTemplates',
+			action: 'Link templates to hosts',
+			description: 'Add templates to hosts, keeping the templates already linked',
 		},
 		{
 			name: 'Mass Add',
@@ -66,6 +92,12 @@ const operationSelect: INodeProperties = {
 			value: 'massUpdate',
 			action: 'Mass update hosts',
 			description: 'Replace properties on multiple hosts at once',
+		},
+		{
+			name: 'Unlink Templates',
+			value: 'unlinkTemplates',
+			action: 'Unlink templates from hosts',
+			description: 'Remove templates from hosts, optionally deleting what they created',
 		},
 		{
 			name: 'Update',
@@ -415,8 +447,63 @@ const massFields: INodeProperties[] = [
 	},
 ];
 
+const HOST_LIST_OPS = ['disable', 'enable', 'getHealth', 'linkTemplates', 'unlinkTemplates'];
+
+const bulkFields: INodeProperties[] = [
+	{
+		displayName:
+			'Templates, Group IDs, Tags and Macros set here REPLACE the host\'s current list — anything not listed is removed (unlinking a template disables its items and triggers). To add without removing, use "Link Templates" or "Mass Add".',
+		name: 'updateReplaceNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: showFor('update'),
+	},
+	{
+		displayName: 'Host Names or IDs',
+		name: 'targetHostids',
+		type: 'multiOptions',
+		typeOptions: { loadOptionsMethod: 'getHosts' },
+		default: [],
+		required: true,
+		description:
+			'Hosts to change. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+		displayOptions: { show: { resource: [resource], operation: HOST_LIST_OPS } },
+	},
+	{
+		displayName: 'Template Names or IDs',
+		name: 'templateIds',
+		type: 'multiOptions',
+		typeOptions: { loadOptionsMethod: 'getTemplates' },
+		default: [],
+		required: true,
+		description:
+			'Templates to link or unlink. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+		displayOptions: { show: { resource: [resource], operation: ['linkTemplates', 'unlinkTemplates'] } },
+	},
+	{
+		displayName: 'Stale After (Minutes)',
+		name: 'staleMinutes',
+		type: 'number',
+		typeOptions: { minValue: 1 },
+		default: 60,
+		description:
+			'An enabled item counts as "no data" when its last value is older than this (trapper items are ignored)',
+		displayOptions: showFor('getHealth'),
+	},
+	{
+		displayName: 'Clear Items and Triggers',
+		name: 'clearTemplateData',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether to also delete the items, triggers and graphs the templates created on the hosts. Off: they stay on the host, no longer linked to the template.',
+		displayOptions: showFor('unlinkTemplates'),
+	},
+];
+
 export const description: INodeProperties[] = [
 	operationSelect,
+	...bulkFields,
 	...writeFields,
 	...getFields,
 	...deleteFields,
@@ -532,6 +619,42 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 		return massOperation.call(this, i, 'host.massadd', 'hosts');
 	},
 
+	async getHealth(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const staleSeconds = (this.getNodeParameter('staleMinutes', i, 60) as number) * 60;
+		const snapshots: IDataObject[] = [];
+		for (const hostid of targetHosts.call(this, i)) {
+			snapshots.push(await hostHealth.call(this, hostid, staleSeconds));
+		}
+		return wrapZabbixResult(snapshots, i);
+	},
+
+	async enable(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		return setStatus.call(this, i, 0);
+	},
+
+	async disable(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		return setStatus.call(this, i, 1);
+	},
+
+	async linkTemplates(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		// host.massadd only adds; host.update with `templates` would replace the list.
+		const result = await zabbixApiRequest.call(this, 'host.massadd', {
+			hosts: targetHosts.call(this, i).map((hostid) => ({ hostid })),
+			templates: toIdArray(this.getNodeParameter('templateIds', i)).map((templateid) => ({ templateid })),
+		});
+		return wrapZabbixResult(result, i);
+	},
+
+	async unlinkTemplates(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const templateids = toIdArray(this.getNodeParameter('templateIds', i));
+		const clear = this.getNodeParameter('clearTemplateData', i, false) as boolean;
+		const result = await zabbixApiRequest.call(this, 'host.massremove', {
+			hostids: targetHosts.call(this, i),
+			[clear ? 'templateids_clear' : 'templateids']: templateids,
+		});
+		return wrapZabbixResult(result, i);
+	},
+
 	async massUpdate(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
 		return massOperation.call(this, i, 'host.massupdate', 'hosts');
 	},
@@ -548,6 +671,116 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 		return wrapZabbixResult(result, i);
 	},
 };
+
+const AVAILABILITY = ['unknown', 'available', 'unavailable'];
+
+async function hostHealth(this: IExecuteFunctions, hostid: string, staleSeconds: number): Promise<IDataObject> {
+	const now = Math.floor(Date.now() / 1000);
+	const baseUrl = zabbixBaseUrl(String((await this.getCredentials('zabbixTokenApi')).url));
+	const timeZone = this.getTimezone();
+
+	const [host] = asRows(await zabbixApiRequest.call(this, 'host.get', {
+		hostids: [hostid],
+		output: 'extend',
+		selectInterfaces: ['type', 'ip', 'dns', 'port', 'available', 'error'],
+		selectHostGroups: ['groupid', 'name'],
+	}));
+	if (!host) return { hostid, found: false, error: `No host ${hostid} — check the ID and the API user's permissions` };
+
+	const interfaces = ((host.interfaces as IDataObject[]) ?? []).map((iface) => ({
+		...iface,
+		available_name: AVAILABILITY[Number(iface.available)] ?? String(iface.available),
+	}));
+	const states = new Set(interfaces.map((iface) => iface.available_name));
+	const availability =
+		states.size === 0 ? 'no interfaces' : states.size === 1 ? [...states][0] : 'partial';
+
+	const problems = asRows(await zabbixApiRequest.call(this, 'problem.get', {
+		hostids: [hostid],
+		output: ['eventid', 'objectid', 'source', 'object', 'name', 'severity', 'clock', 'r_clock', 'acknowledged', 'suppressed'],
+		selectTags: 'extend',
+	}));
+	const bySeverity: IDataObject = {};
+	for (const p of problems) {
+		const name = severityName(p.severity);
+		bySeverity[name] = Number(bySeverity[name] ?? 0) + 1;
+	}
+	const oldest = [...problems]
+		.sort((a, b) => Number(a.clock) - Number(b.clock))
+		.slice(0, 5)
+		.map((p) => simplifyEvent(enrichEvent({ ...p, hosts: [host] }, baseUrl, timeZone)));
+
+	const items = asRows(await zabbixApiRequest.call(this, 'item.get', {
+		hostids: [hostid],
+		monitored: true,
+		output: ['itemid', 'name', 'key_', 'type', 'lastclock', 'state', 'error'],
+	}));
+	const unsupported = items.filter((item) => String(item.state) === '1');
+	const stale = items.filter(
+		(item) =>
+			String(item.type) !== '2' &&
+			String(item.state) !== '1' &&
+			(Number(item.lastclock ?? 0) === 0 || now - Number(item.lastclock) > staleSeconds),
+	);
+
+	const proxyid = String(host.proxyid ?? host.proxy_hostid ?? '0');
+	let proxy: IDataObject | null = null;
+	if (proxyid !== '0' && proxyid !== '') {
+		const [p] = asRows(await zabbixApiRequest.call(this, 'proxy.get', {
+			proxyids: [proxyid],
+			output: 'extend',
+		}));
+		if (p) {
+			const lastSeen = Number(p.lastaccess ?? 0);
+			proxy = {
+				proxyid,
+				name: p.name ?? p.host,
+				version: p.version,
+				last_seen_seconds_ago: lastSeen ? now - lastSeen : null,
+				healthy: lastSeen > 0 && now - lastSeen < 300,
+			};
+		}
+	}
+
+	return {
+		hostid,
+		found: true,
+		host: host.host,
+		name: host.name,
+		enabled: String(host.status) === '0',
+		in_maintenance: String(host.maintenance_status) === '1',
+		groups: host.hostgroups,
+		availability,
+		interfaces,
+		problems: { total: problems.length, by_severity: bySeverity, oldest },
+		items: {
+			monitored: items.length,
+			unsupported: unsupported.length,
+			no_data: stale.length,
+			unsupported_examples: unsupported.slice(0, 10).map((item) => ({ name: item.name, key_: item.key_, error: item.error })),
+			no_data_examples: stale.slice(0, 10).map((item) => ({
+				name: item.name,
+				key_: item.key_,
+				last_value_at: Number(item.lastclock) ? localTime(item.lastclock, timeZone) : 'never',
+			})),
+		},
+		proxy,
+		url: `${baseUrl}/zabbix.php?action=latest.view&filter_set=1&hostids%5B%5D=${hostid}`,
+	};
+}
+
+function targetHosts(this: IExecuteFunctions, i: number): string[] {
+	return toIdArray(this.getNodeParameter('targetHostids', i));
+}
+
+async function setStatus(this: IExecuteFunctions, i: number, status: 0 | 1): Promise<INodeExecutionData[]> {
+	const result = await zabbixApiRequest.call(
+		this,
+		'host.update',
+		targetHosts.call(this, i).map((hostid) => ({ hostid, status })),
+	);
+	return wrapZabbixResult(result, i);
+}
 
 async function massOperation(
 	this: IExecuteFunctions,

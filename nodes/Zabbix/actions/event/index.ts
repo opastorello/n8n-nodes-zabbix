@@ -1,6 +1,7 @@
 import type { IDataObject, IExecuteFunctions, INodeExecutionData, INodeProperties } from 'n8n-workflow';
 
 import { buildCommonGetParams, getCommonDescription } from '../../descriptions/getCommon.description';
+import { SEVERITY_NAMES } from '../../helpers/eventFormat';
 import type { IZabbixResourceModule } from '../../helpers/interfaces';
 import { toIdArray, wrapZabbixResult } from '../../helpers/utils';
 import { zabbixApiRequest } from '../../transport';
@@ -120,6 +121,31 @@ export const description: INodeProperties[] = [
 		description: 'Text of the message to add (used with the Add Message action)',
 		displayOptions: showFor('acknowledge'),
 	},
+	{
+		displayName: 'New Severity',
+		name: 'newSeverity',
+		type: 'options',
+		default: 3,
+		description: 'Severity to set (used with the Change Severity action)',
+		options: SEVERITY_NAMES.map((name, value) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name)),
+		displayOptions: showFor('acknowledge'),
+	},
+	{
+		displayName: 'Suppress Until',
+		name: 'suppressUntil',
+		type: 'dateTime',
+		default: '',
+		description: 'End of the suppression (used with the Suppress action). Leave empty to suppress indefinitely.',
+		displayOptions: showFor('acknowledge'),
+	},
+	{
+		displayName:
+			'Acknowledging, closing or messaging runs the "update operations" of matching Zabbix actions — usually notifications. Doing it to many events at once can flood your channels. Closing only works on triggers that allow manual close.',
+		name: 'ackNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: showFor('acknowledge'),
+	},
 ];
 
 export const handlers: IZabbixResourceModule['handlers'] = {
@@ -149,6 +175,11 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 			action: actions.reduce((sum, flag) => sum + flag, 0),
 		};
 		if (message) params.message = message;
+		if (actions.includes(8)) params.severity = this.getNodeParameter('newSeverity', i, 3) as number;
+		if (actions.includes(32)) {
+			const until = this.getNodeParameter('suppressUntil', i, '') as string;
+			params.suppress_until = until ? Math.floor(new Date(until).getTime() / 1000) : 0;
+		}
 
 		const result = await zabbixApiRequest.call(this, 'event.acknowledge', params);
 		return wrapZabbixResult(result, i);
