@@ -37,8 +37,22 @@ export async function getTemplates(this: ILoadOptionsFunctions): Promise<INodePr
 	return loadNamed(this, 'template.get', 'templateid');
 }
 
+/** Hosts labelled with their main interface address, so they can be found by IP. */
 export async function getHosts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-	return loadNamed(this, 'host.get', 'hostid');
+	const rows = (await zabbixApiRequest.call(this, 'host.get', {
+		output: ['hostid', 'name'],
+		selectInterfaces: ['ip', 'dns', 'main'],
+		sortfield: 'name',
+		limit: 1000,
+	})) as IDataObject[];
+	return (Array.isArray(rows) ? rows : [])
+		.map((row) => {
+			const interfaces = (row.interfaces as IDataObject[]) ?? [];
+			const main = interfaces.find((iface) => String(iface.main) === '1') ?? interfaces[0];
+			const address = main ? String(main.ip || main.dns || '') : '';
+			return { name: address ? `${String(row.name)} (${address})` : String(row.name), value: String(row.hostid) };
+		})
+		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getProxies(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {

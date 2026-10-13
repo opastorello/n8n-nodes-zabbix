@@ -1,0 +1,14 @@
+{
+	"node": "n8n-nodes-zabbix.zabbixWebhookTrigger",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Utility"],
+	"alias": ["monitoring", "alert", "problem", "event", "incident", "webhook", "media type", "NOC"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://www.zabbix.com/documentation/current/en/manual/config/notifications/media/webhook"
+			}
+		]
+	}
+}

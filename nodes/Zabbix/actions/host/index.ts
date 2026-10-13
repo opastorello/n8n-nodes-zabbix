@@ -1,8 +1,9 @@
-import type {
-	IDataObject,
-	IExecuteFunctions,
-	INodeExecutionData,
-	INodeProperties,
+import {
+	NodeOperationError,
+	type IDataObject,
+	type IExecuteFunctions,
+	type INodeExecutionData,
+	type INodeProperties,
 } from 'n8n-workflow';
 
 import type { IZabbixResourceModule } from '../../helpers/interfaces';
@@ -15,7 +16,7 @@ import {
 	wrapZabbixResult,
 } from '../../helpers/utils';
 import { buildCommonGetParams, getCommonDescription } from '../../descriptions/getCommon.description';
-import { asRows, enrichEvent, localTime, severityName, simplifyEvent } from '../../helpers/eventFormat';
+import { asRows, attachHosts, enrichEvent, localTime, severityName, simplifyEvent } from '../../helpers/eventFormat';
 import { zabbixApiRequest, zabbixBaseUrl } from '../../transport';
 
 const resource = 'host';
@@ -70,6 +71,13 @@ const operationSelect: INodeProperties = {
 			description: 'Retrieve hosts, with optional group/template/name filters',
 		},
 		{
+			name: 'Get Site Summary',
+			value: 'getSiteSummary',
+			action: 'Get a summary of a site',
+			description:
+				'Hosts up/down and open problems by severity for a host group or a site tag, with the oldest problems',
+		},
+		{
 			name: 'Link Templates',
 			value: 'linkTemplates',
 			action: 'Link templates to hosts',
@@ -92,6 +100,18 @@ const operationSelect: INodeProperties = {
 			value: 'massUpdate',
 			action: 'Mass update hosts',
 			description: 'Replace properties on multiple hosts at once',
+		},
+		{
+			name: 'Set Macros',
+			value: 'setMacros',
+			action: 'Set macros on hosts',
+			description: 'Add/update, replace or remove host macros — the mode is explicit',
+		},
+		{
+			name: 'Set Tags',
+			value: 'setTags',
+			action: 'Set tags on hosts',
+			description: 'Add, replace or remove host tags — the mode is explicit',
 		},
 		{
 			name: 'Unlink Templates',
@@ -447,7 +467,8 @@ const massFields: INodeProperties[] = [
 	},
 ];
 
-const HOST_LIST_OPS = ['disable', 'enable', 'getHealth', 'linkTemplates', 'unlinkTemplates'];
+const HOST_LIST_OPS = ['disable', 'enable', 'getHealth', 'linkTemplates', 'setMacros', 'setTags', 'unlinkTemplates'];
+const DRY_RUN_OPS = ['disable', 'enable', 'linkTemplates', 'setMacros', 'setTags', 'unlinkTemplates'];
 
 const bulkFields: INodeProperties[] = [
 	{
@@ -466,8 +487,70 @@ const bulkFields: INodeProperties[] = [
 		default: [],
 		required: true,
 		description:
-			'Hosts to change. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			'Hosts to act on (interface IP addresses work too). Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 		displayOptions: { show: { resource: [resource], operation: HOST_LIST_OPS } },
+	},
+	{
+		displayName: 'Dry Run',
+		name: 'dryRun',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to only report what would change (before/after per host) without changing Zabbix',
+		displayOptions: { show: { resource: [resource], operation: DRY_RUN_OPS } },
+	},
+	{
+		displayName: 'Mode',
+		name: 'tagMode',
+		type: 'options',
+		default: 'merge',
+		options: [
+			{ name: 'Merge (Add)', value: 'merge', description: 'Add these tags; keep every existing tag' },
+			{ name: 'Remove', value: 'remove', description: 'Remove these tags (a tag with an empty value removes every value of it)' },
+			{ name: 'Replace All', value: 'replace', description: 'The host ends up with exactly these tags' },
+		],
+		displayOptions: showFor('setTags'),
+	},
+	{ ...tagsField('host'), name: 'hostTags', displayOptions: showFor('setTags') },
+	{
+		displayName: 'Mode',
+		name: 'macroMode',
+		type: 'options',
+		default: 'merge',
+		options: [
+			{ name: 'Merge (Add or Update)', value: 'merge', description: 'Create missing macros, update the value of existing ones; keep the rest' },
+			{ name: 'Remove', value: 'remove', description: 'Delete these macros (value is ignored)' },
+			{ name: 'Replace All', value: 'replace', description: 'The host ends up with exactly these macros — secret macros not listed are lost' },
+		],
+		displayOptions: showFor('setMacros'),
+	},
+	{ ...macrosField('host'), name: 'hostMacros', displayOptions: showFor('setMacros') },
+	{
+		displayName: 'Host Group Names or IDs',
+		name: 'summaryGroupIds',
+		type: 'multiOptions',
+		typeOptions: { loadOptionsMethod: 'getHostGroups' },
+		default: [],
+		description:
+			'Hosts of these groups make up the site. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+		displayOptions: showFor('getSiteSummary'),
+	},
+	{
+		displayName: 'Site Tag',
+		name: 'summaryTag',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. site',
+		description: 'Or select hosts by a host tag (combined with the groups if both are set)',
+		displayOptions: showFor('getSiteSummary'),
+	},
+	{
+		displayName: 'Site Tag Value',
+		name: 'summaryTagValue',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. XDRJ',
+		description: 'Value of the site tag (leave empty for any value)',
+		displayOptions: showFor('getSiteSummary'),
 	},
 	{
 		displayName: 'Template Names or IDs',
@@ -622,7 +705,7 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 	async getHealth(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
 		const staleSeconds = (this.getNodeParameter('staleMinutes', i, 60) as number) * 60;
 		const snapshots: IDataObject[] = [];
-		for (const hostid of targetHosts.call(this, i)) {
+		for (const hostid of await targetHosts.call(this, i)) {
 			snapshots.push(await hostHealth.call(this, hostid, staleSeconds));
 		}
 		return wrapZabbixResult(snapshots, i);
@@ -637,22 +720,183 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 	},
 
 	async linkTemplates(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const hostids = await targetHosts.call(this, i);
+		const templateids = toIdArray(this.getNodeParameter('templateIds', i));
+		if (isDryRun.call(this, i)) {
+			return wrapZabbixResult(
+				(await linkedTemplates.call(this, hostids)).map(({ hostid, name, templates }) => ({
+					dry_run: true,
+					hostid,
+					name,
+					before: templates,
+					after: [...new Set([...templates, ...templateids])],
+				})),
+				i,
+			);
+		}
 		// host.massadd only adds; host.update with `templates` would replace the list.
 		const result = await zabbixApiRequest.call(this, 'host.massadd', {
-			hosts: targetHosts.call(this, i).map((hostid) => ({ hostid })),
-			templates: toIdArray(this.getNodeParameter('templateIds', i)).map((templateid) => ({ templateid })),
+			hosts: hostids.map((hostid) => ({ hostid })),
+			templates: templateids.map((templateid) => ({ templateid })),
 		});
 		return wrapZabbixResult(result, i);
 	},
 
 	async unlinkTemplates(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const hostids = await targetHosts.call(this, i);
 		const templateids = toIdArray(this.getNodeParameter('templateIds', i));
 		const clear = this.getNodeParameter('clearTemplateData', i, false) as boolean;
+		if (isDryRun.call(this, i)) {
+			return wrapZabbixResult(
+				(await linkedTemplates.call(this, hostids)).map(({ hostid, name, templates }) => ({
+					dry_run: true,
+					hostid,
+					name,
+					before: templates,
+					after: templates.filter((id) => !templateids.includes(id)),
+					clears_items_and_triggers: clear,
+				})),
+				i,
+			);
+		}
 		const result = await zabbixApiRequest.call(this, 'host.massremove', {
-			hostids: targetHosts.call(this, i),
+			hostids,
 			[clear ? 'templateids_clear' : 'templateids']: templateids,
 		});
 		return wrapZabbixResult(result, i);
+	},
+
+	async setTags(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const mode = this.getNodeParameter('tagMode', i, 'merge') as string;
+		const given = (unwrapFixedCollection(this.getNodeParameter('hostTags', i, {}), 'tagItems') ?? []) as IDataObject[];
+		const wanted = (Array.isArray(given) ? given : []).map((t) => ({ tag: String(t.tag ?? ''), value: String(t.value ?? '') })).filter((t) => t.tag);
+		const hosts = asRows(
+			await zabbixApiRequest.call(this, 'host.get', {
+				hostids: await targetHosts.call(this, i),
+				output: ['hostid', 'name'],
+				selectTags: ['tag', 'value', 'automatic'],
+			}),
+		);
+		const key = (t: IDataObject) => `${String(t.tag)}\u0000${String(t.value)}`;
+		const results: IDataObject[] = [];
+		for (const host of hosts) {
+			// Tags added by discovery (automatic) can't be set through host.update.
+			const current = ((host.tags as IDataObject[]) ?? [])
+				.filter((t) => String(t.automatic ?? '0') !== '1')
+				.map((t) => ({ tag: String(t.tag), value: String(t.value) }));
+			let next: IDataObject[];
+			if (mode === 'replace') next = wanted;
+			else if (mode === 'remove')
+				next = current.filter((t) => !wanted.some((w) => w.tag === t.tag && (w.value === '' || w.value === t.value)));
+			else next = [...current, ...wanted.filter((w) => !current.some((t) => key(t) === key(w)))];
+			if (isDryRun.call(this, i)) {
+				results.push({ dry_run: true, hostid: host.hostid, name: host.name, before: current, after: next });
+				continue;
+			}
+			await zabbixApiRequest.call(this, 'host.update', { hostid: host.hostid, tags: next });
+			results.push({ hostid: host.hostid, name: host.name, tags: next });
+		}
+		return wrapZabbixResult(results, i);
+	},
+
+	async setMacros(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const mode = this.getNodeParameter('macroMode', i, 'merge') as string;
+		const given = (unwrapFixedCollection(this.getNodeParameter('hostMacros', i, {}), 'macroItems') ?? []) as IDataObject[];
+		const wanted = (Array.isArray(given) ? given : [])
+			.map((m) => ({ macro: String(m.macro ?? '').trim(), value: String(m.value ?? '') }))
+			.filter((m) => m.macro);
+		const hostids = await targetHosts.call(this, i);
+		const existing = asRows(
+			await zabbixApiRequest.call(this, 'usermacro.get', { hostids, output: ['hostmacroid', 'hostid', 'macro', 'type'] }),
+		);
+		const dryRun = isDryRun.call(this, i);
+		const results: IDataObject[] = [];
+		for (const hostid of hostids) {
+			const mine = existing.filter((m) => String(m.hostid) === hostid);
+			const find = (macro: string) => mine.find((m) => String(m.macro) === macro);
+			const plan: IDataObject[] = [];
+			if (mode === 'replace') {
+				plan.push({ action: 'replace', macros: wanted.map((m) => m.macro), removed: mine.map((m) => m.macro).filter((m) => !wanted.some((w) => w.macro === m)) });
+				if (!dryRun) await zabbixApiRequest.call(this, 'host.update', { hostid, macros: wanted });
+			} else if (mode === 'remove') {
+				const ids = wanted.map((w) => find(w.macro)).filter((m): m is IDataObject => !!m);
+				plan.push({ action: 'remove', macros: ids.map((m) => m.macro) });
+				if (!dryRun && ids.length) await zabbixApiRequest.call(this, 'usermacro.delete', ids.map((m) => m.hostmacroid));
+			} else {
+				for (const w of wanted) {
+					const found = find(w.macro);
+					plan.push({ action: found ? 'update' : 'create', macro: w.macro });
+					if (dryRun) continue;
+					if (found) await zabbixApiRequest.call(this, 'usermacro.update', { hostmacroid: found.hostmacroid, value: w.value });
+					else await zabbixApiRequest.call(this, 'usermacro.create', { hostid, macro: w.macro, value: w.value });
+				}
+			}
+			results.push({ ...(dryRun ? { dry_run: true } : {}), hostid, changes: plan });
+		}
+		return wrapZabbixResult(results, i);
+	},
+
+	async getSiteSummary(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const groupids = toIdArray(this.getNodeParameter('summaryGroupIds', i, []));
+		const tag = String(this.getNodeParameter('summaryTag', i, '')).trim();
+		const tagValue = String(this.getNodeParameter('summaryTagValue', i, '')).trim();
+		if (!groupids.length && !tag) {
+			throw new NodeOperationError(this.getNode(), 'Choose at least one host group or a site tag', { itemIndex: i });
+		}
+		const query: IDataObject = {
+			output: ['hostid', 'host', 'name', 'status', 'maintenance_status'],
+			selectInterfaces: ['available'],
+		};
+		if (groupids.length) query.groupids = groupids;
+		if (tag) query.tags = [{ tag, value: tagValue, operator: tagValue ? 1 : 4 }];
+		const hosts = asRows(await zabbixApiRequest.call(this, 'host.get', query));
+
+		const counts = { total: hosts.length, up: 0, down: 0, unknown: 0, disabled: 0, in_maintenance: 0 };
+		const down: IDataObject[] = [];
+		for (const host of hosts) {
+			if (String(host.status) === '1') {
+				counts.disabled++;
+				continue;
+			}
+			if (String(host.maintenance_status) === '1') counts.in_maintenance++;
+			const states = ((host.interfaces as IDataObject[]) ?? []).map((iface) => String(iface.available));
+			if (states.includes('2')) {
+				counts.down++;
+				down.push({ hostid: host.hostid, name: host.name ?? host.host });
+			} else if (states.includes('1')) counts.up++;
+			else counts.unknown++;
+		}
+
+		const hostids = hosts.map((h) => h.hostid);
+		const problems = hostids.length
+			? asRows(
+					await zabbixApiRequest.call(this, 'problem.get', {
+						hostids,
+						output: ['eventid', 'objectid', 'source', 'object', 'name', 'severity', 'clock', 'r_clock', 'acknowledged', 'suppressed'],
+					}),
+				)
+			: [];
+		await attachHosts.call(this, problems);
+		const baseUrl = zabbixBaseUrl(String((await this.getCredentials('zabbixTokenApi')).url));
+		const bySeverity: IDataObject = {};
+		for (const p of problems) {
+			const name = severityName(p.severity);
+			bySeverity[name] = Number(bySeverity[name] ?? 0) + 1;
+		}
+		const oldest = [...problems]
+			.sort((a, b) => Number(a.clock) - Number(b.clock))
+			.slice(0, 5)
+			.map((p) => simplifyEvent(enrichEvent(p, baseUrl, this.getTimezone())));
+
+		return wrapZabbixResult(
+			{
+				site: tag ? `${tag}${tagValue ? `=${tagValue}` : ''}` : groupids.join(','),
+				hosts: counts,
+				hosts_down: down.slice(0, 20),
+				problems: { total: problems.length, by_severity: bySeverity, unacknowledged: problems.filter((p) => String(p.acknowledged) === '0').length, oldest },
+			},
+			i,
+		);
 	},
 
 	async massUpdate(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
@@ -769,15 +1013,68 @@ async function hostHealth(this: IExecuteFunctions, hostid: string, staleSeconds:
 	};
 }
 
-function targetHosts(this: IExecuteFunctions, i: number): string[] {
-	return toIdArray(this.getNodeParameter('targetHostids', i));
+const IP_ADDRESS = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-f]*:[0-9a-f:.]+)$/i;
+
+/** Host IDs from the "Host Names or IDs" field; interface IP addresses are resolved to their hosts. */
+async function targetHosts(this: IExecuteFunctions, i: number): Promise<string[]> {
+	const values = toIdArray(this.getNodeParameter('targetHostids', i));
+	const ips = values.filter((v) => IP_ADDRESS.test(v));
+	if (!ips.length) return values;
+	const interfaces = asRows(
+		await zabbixApiRequest.call(this, 'hostinterface.get', { filter: { ip: ips }, output: ['hostid', 'ip'] }),
+	);
+	const missing = ips.filter((ip) => !interfaces.some((iface) => iface.ip === ip));
+	if (missing.length) {
+		throw new NodeOperationError(this.getNode(), `No host has an interface with IP ${missing.join(', ')}`, {
+			itemIndex: i,
+		});
+	}
+	const ids = [...values.filter((v) => !IP_ADDRESS.test(v)), ...interfaces.map((iface) => String(iface.hostid))];
+	return [...new Set(ids)];
+}
+
+function isDryRun(this: IExecuteFunctions, i: number): boolean {
+	return this.getNodeParameter('dryRun', i, false) as boolean;
+}
+
+async function linkedTemplates(
+	this: IExecuteFunctions,
+	hostids: string[],
+): Promise<Array<{ hostid: string; name: string; templates: string[] }>> {
+	const hosts = asRows(
+		await zabbixApiRequest.call(this, 'host.get', {
+			hostids,
+			output: ['hostid', 'name'],
+			selectParentTemplates: ['templateid'],
+		}),
+	);
+	return hosts.map((h) => ({
+		hostid: String(h.hostid),
+		name: String(h.name),
+		templates: ((h.parentTemplates as IDataObject[]) ?? []).map((t) => String(t.templateid)),
+	}));
 }
 
 async function setStatus(this: IExecuteFunctions, i: number, status: 0 | 1): Promise<INodeExecutionData[]> {
+	const hostids = await targetHosts.call(this, i);
+	if (isDryRun.call(this, i)) {
+		const hosts = asRows(await zabbixApiRequest.call(this, 'host.get', { hostids, output: ['hostid', 'name', 'status'] }));
+		return wrapZabbixResult(
+			hosts.map((h) => ({
+				dry_run: true,
+				hostid: h.hostid,
+				name: h.name,
+				before: String(h.status) === '0' ? 'enabled' : 'disabled',
+				after: status === 0 ? 'enabled' : 'disabled',
+				changes: String(h.status) !== String(status),
+			})),
+			i,
+		);
+	}
 	const result = await zabbixApiRequest.call(
 		this,
 		'host.update',
-		targetHosts.call(this, i).map((hostid) => ({ hostid, status })),
+		hostids.map((hostid) => ({ hostid, status })),
 	);
 	return wrapZabbixResult(result, i);
 }

@@ -1,9 +1,10 @@
 # n8n-nodes-zabbix
 
-An [n8n](https://n8n.io) community node package for the **Zabbix JSON-RPC API**, tested live against **Zabbix 7.4** and the **Zabbix 8.0** development branch (see [Version compatibility](#version-compatibility)). It ships two nodes:
+An [n8n](https://n8n.io) community node package for the **Zabbix JSON-RPC API**, tested live against **Zabbix 7.4** and the **Zabbix 8.0** development branch (see [Version compatibility](#version-compatibility)). It ships three nodes:
 
 - **Zabbix** — action node with **60 resources / 223 operations** covering the full Zabbix API (hosts, items, triggers, problems, events, templates, maintenances, users, dashboards, scripts, configuration import/export, and more).
 - **Zabbix Trigger** — a polling trigger that starts your workflow when a **problem opens**, a **problem resolves**, or any **new event** appears in Zabbix.
+- **Zabbix Webhook Trigger** — push alternative: registers a webhook media type in Zabbix and starts the workflow the moment an action sends an alert.
 
 The **Zabbix** node is marked `usableAsTool`, so an **n8n AI Agent** can call it as a tool ("list the disaster-severity problems", "acknowledge event 9001", …).
 
@@ -16,6 +17,7 @@ The **Zabbix** node is marked `usableAsTool`, so an **n8n AI Agent** can call it
   - [Creating and updating objects](#creating-and-updating-objects)
   - [Deleting objects](#deleting-objects)
   - [Special operations](#special-operations)
+- [The Zabbix Webhook Trigger node](#the-zabbix-webhook-trigger-node)
 - [The Zabbix Trigger node](#the-zabbix-trigger-node)
 - [Using with AI Agents](#using-with-ai-agents)
 - [Example workflows](#example-workflows)
@@ -98,6 +100,14 @@ Built for triage — each one makes several API calls and returns a single resul
 - **Problem → Get Many** — filters for **minimum severity**, acknowledged, suppressed and recently resolved. Every row gets `hosts` (which `problem.get` can't return by itself), `severity_name`, `event_url`, `since` (ISO), `since_local` (workflow time zone) and `duration_seconds`. **Simplify** returns just `name, severity, severity_name, host, since, duration_seconds, acknowledged, suppressed, tags, url`.
 - **Host → Link Templates / Unlink Templates** — *adds* templates (`host.massadd`) without touching the ones already linked; unlink optionally clears what the templates created. Use these instead of **Update**, where the Templates field **replaces** the whole list (the node shows a warning there).
 - **Host → Enable / Disable** — for one or many hosts in one call.
+- **Host → Set Tags / Set Macros** — explicit mode: *Merge* (add; macros are created or updated one by one, so secret macros you don't mention are kept), *Replace All* or *Remove*. Discovery-created tags are left alone.
+- **Host → Get Site Summary** — for a host group or a site tag (e.g. `site=XDRJ`): hosts up / down / unknown / disabled / in maintenance, open problems by severity, unacknowledged count and the 5 oldest.
+- **Dry Run** on Enable, Disable, Link/Unlink Templates, Set Tags and Set Macros returns the *before/after* per host without changing anything.
+- **Hosts by IP** — every "Host Names or IDs" field of these operations also accepts interface IP addresses, and the dropdown shows each host's IP.
+- **Event → Who Gets Notified** — evaluates every enabled trigger action against the event (host group, host, trigger, name, severity, template, suppressed, tags, custom formulas) and lists who each matching action notifies on problem, **on acknowledge** and on recovery. Run it before a bulk acknowledge. Conditions it can't evaluate (e.g. time periods) make the action *maybe*, never *no*.
+- **Item → Get History** — values of several items over a window; the history type is read from each item (a wrong type makes Zabbix return nothing, silently), and windows longer than *Use Trends After* read hourly trends for numeric items.
+- **Item → Get Graph Image** — PNG of one or more items (binary output, ready for Chat/ticket). Needs a **Username & Password** credential: graphs come from the frontend, which API tokens can't log in to.
+- **Severity by name** — severity fields set by expression or by an AI agent accept `average`, `High`, `disaster` as well as numbers.
 
 ### Special operations
 
@@ -110,6 +120,18 @@ Beyond CRUD, the node exposes every extra verb of the API:
 - **Host / Template / Host Group / Template Group / Host Interface → Mass \*** — bulk add/remove/update relations; **Propagate** pushes group permissions to subgroups.
 - **SLA → Get SLI** — service-level indicator report; **Token → Generate**; **User → Unblock / Provision / Reset TOTP / Logout**; **User Directory → Test**; **Task → Create** (e.g. "check now" for an item).
 
+## The Zabbix Webhook Trigger node
+
+Push instead of polling: the workflow starts the moment a Zabbix action sends an alert.
+
+1. Add the node, pick the Zabbix credential, set a **Media Type Name** (unique per workflow) and optionally a **Shared Secret**.
+2. **Activate the workflow.** The node creates (or re-enables) a webhook media type with that name in Zabbix, pointing at its Production URL with the secret. Deactivating only *disables* it, so users' media and actions survive.
+3. In Zabbix, add that media type to a user and send to that user from an action (problem, recovery and/or update operations).
+
+Each alert arrives as `kind` (*problem*, *recovery* or *update*), `eventid`, `name`, `severity`, `severity_name`, `host`, `host_name`, `host_ip`, `triggerid`, `tags`, `update` (action, message, user) and the raw payload. Filter by **Events** and **Minimum Severity**; requests without the secret get HTTP 401. The Zabbix server must be able to reach your n8n URL.
+
+You can also create the media type yourself with **Media Type → Create Webhook Media Type** on the Zabbix node.
+
 ## The Zabbix Trigger node
 
 Starts a workflow when something new happens in Zabbix (polling — configure the interval on the node's *Settings → Poll Times*).
@@ -121,6 +143,7 @@ Starts a workflow when something new happens in Zabbix (polling — configure th
 | **Minimum Severity** | Problem modes: fire at or above this severity (e.g. *High* fires for High + Disaster). For *Problem Resolved* it applies to the trigger's severity. |
 | **Ignore Suppressed** | Skip problems suppressed by a maintenance (hosts in maintenance) or by a manual suppress. |
 | **Name Matches / Name Excludes (Regex)** | Only fire for (or skip) event names matching a regular expression; prefix `(?i)` for case-insensitive. |
+| **Suppress Repeats (Minutes)** | Fire at most once per trigger in this window — a flapping problem that reopens inside it is skipped (e.g. 45). |
 | **Additional Filters (JSON)** | Optional raw `event.get` parameters merged into the poll request (e.g. `{"tags":[{"tag":"env","value":"prod"}]}`). Invalid JSON stops the trigger with an error instead of being silently ignored. |
 
 Every emitted event is ready to drop into an alert or ticket:
@@ -315,6 +338,7 @@ npm run test:e2e           # write lifecycle
 npm run test:e2e:full      # every operation
 npm run test:e2e:trigger   # polling trigger: problem → resolved, exactly-once
 npm run test:e2e:compat    # *.massupdate gives the same result on 7.4 and 8.0
+npm run test:e2e:noc       # NOC operations, Who Gets Notified, webhook end to end, graph image, dedup
 ```
 
 Another version side by side, e.g. the 8.0 development branch on port 8090:

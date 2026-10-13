@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- **Zabbix Webhook Trigger** node: registers (and on deactivation disables) a webhook media type in Zabbix and starts the workflow on each alert — problem, recovery or acknowledge/update — with a shared secret, event and severity filters.
+- **Media Type → Create Webhook Media Type**.
+- **Event → Who Gets Notified**: which enabled actions match an event and who they notify on problem, acknowledge and recovery.
+- **Item → Get History** (value type detected per item, trends for long windows) and **Item → Get Graph Image** (PNG; needs a username/password credential).
+- **Host → Set Tags / Set Macros** with explicit Merge / Replace / Remove, **Get Site Summary**, **Dry Run** on bulk host operations, hosts selectable by interface IP.
+- Zabbix Trigger: **Suppress Repeats** window against flapping problems.
+- Severity fields accept names (`average`, `High`) as well as numbers.
+
+### Tested
+- New live suite (`test:e2e:noc`) passes on Zabbix 7.0 and 7.4, including a real webhook delivery from Zabbix to the node.
+
 ## 0.2.0
 
 ### Added

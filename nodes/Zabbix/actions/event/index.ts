@@ -1,8 +1,9 @@
 import type { IDataObject, IExecuteFunctions, INodeExecutionData, INodeProperties } from 'n8n-workflow';
 
 import { buildCommonGetParams, getCommonDescription } from '../../descriptions/getCommon.description';
-import { SEVERITY_NAMES } from '../../helpers/eventFormat';
+import { SEVERITY_NAMES, parseSeverity } from '../../helpers/eventFormat';
 import type { IZabbixResourceModule } from '../../helpers/interfaces';
+import { whoGetsNotified } from '../../helpers/notifications';
 import { toIdArray, wrapZabbixResult } from '../../helpers/utils';
 import { zabbixApiRequest } from '../../transport';
 
@@ -34,6 +35,13 @@ export const description: INodeProperties[] = [
 				value: 'getAll',
 				action: 'Get many events',
 				description: 'Retrieve events, with optional group/host filters',
+			},
+			{
+				name: 'Who Gets Notified',
+				value: 'whoGetsNotified',
+				action: 'Find who gets notified about an event',
+				description:
+					'Which enabled actions match this event and who they notify on problem, acknowledge and recovery — check before a bulk acknowledge',
 			},
 		],
 		default: 'getAll',
@@ -122,6 +130,16 @@ export const description: INodeProperties[] = [
 		displayOptions: showFor('acknowledge'),
 	},
 	{
+		displayName: 'Event ID',
+		name: 'notifyEventId',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'e.g. 9001',
+		description: 'Problem event to evaluate the actions against',
+		displayOptions: showFor('whoGetsNotified'),
+	},
+	{
 		displayName: 'New Severity',
 		name: 'newSeverity',
 		type: 'options',
@@ -165,6 +183,11 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 		return wrapZabbixResult(result, i);
 	},
 
+	async whoGetsNotified(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+		const eventid = String(this.getNodeParameter('notifyEventId', i)).trim();
+		return wrapZabbixResult(await whoGetsNotified.call(this, eventid), i);
+	},
+
 	async acknowledge(this: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
 		const eventids = toIdArray(this.getNodeParameter('ackEventids', i));
 		const actions = this.getNodeParameter('action', i, []) as number[];
@@ -175,7 +198,7 @@ export const handlers: IZabbixResourceModule['handlers'] = {
 			action: actions.reduce((sum, flag) => sum + flag, 0),
 		};
 		if (message) params.message = message;
-		if (actions.includes(8)) params.severity = this.getNodeParameter('newSeverity', i, 3) as number;
+		if (actions.includes(8)) params.severity = parseSeverity(this.getNodeParameter('newSeverity', i, 3));
 		if (actions.includes(32)) {
 			const until = this.getNodeParameter('suppressUntil', i, '') as string;
 			params.suppress_until = until ? Math.floor(new Date(until).getTime() / 1000) : 0;

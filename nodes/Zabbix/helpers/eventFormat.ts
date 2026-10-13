@@ -19,6 +19,20 @@ export const SEVERITY_OPTIONS = [
 	{ name: 'Warning', value: 2, description: 'Warning and above' },
 ];
 
+/**
+ * Severity from a number (`3`, `"3"`) or a name (`"average"`, `"High"`,
+ * `"not classified"`, `"info"`) — expressions and AI agents send either.
+ */
+export function parseSeverity(value: unknown): number {
+	if (typeof value === 'number') return value;
+	const text = String(value ?? '').trim().toLowerCase();
+	if (/^\d+$/.test(text)) return Number(text);
+	const index = SEVERITY_NAMES.findIndex((name) => name.toLowerCase() === text);
+	if (index >= 0) return index;
+	const aliases: Record<string, number> = { info: 1, informational: 1, warn: 2, notclassified: 0, unclassified: 0, crit: 5, critical: 5 };
+	return aliases[text.replace(/[\s_-]/g, '')] ?? 0;
+}
+
 /** `[3, 4, 5]` for minimum severity 3; empty (no filter) for 0. */
 export function severitiesFrom(minimum: number): number[] {
 	return minimum > 0 ? Array.from({ length: 6 - minimum }, (_, k) => minimum + k) : [];

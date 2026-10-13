@@ -6,6 +6,7 @@ import {
 	attachHosts,
 	enrichEvent,
 	localTime,
+	parseSeverity,
 	severitiesFrom,
 	severityName,
 	simplifyEvent,
@@ -83,7 +84,7 @@ const resourceModule = createGetOnlyResource({
 	],
 	extraFields: filterFields,
 	extendParams(i, params) {
-		const severities = severitiesFrom(this.getNodeParameter('minSeverity', i, 0) as number);
+		const severities = severitiesFrom(parseSeverity(this.getNodeParameter('minSeverity', i, 0)));
 		if (severities.length) params.severities = severities;
 		const ack = this.getNodeParameter('ackFilter', i, 'any') as string;
 		if (ack !== 'any') params.acknowledged = ack === 'yes';

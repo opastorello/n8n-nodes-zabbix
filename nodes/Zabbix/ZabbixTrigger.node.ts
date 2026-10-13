@@ -12,7 +12,7 @@ import {
 } from 'n8n-workflow';
 
 import { zabbixApiRequest, zabbixBaseUrl, zabbixCredentialTest } from './transport';
-import { eventUrl, localTime, severityName } from './helpers/eventFormat';
+import { eventUrl, localTime, parseSeverity, severityName } from './helpers/eventFormat';
 import { loadOptionsMethods } from './methods/loadOptions';
 
 const PAGE_SIZE = 100;
@@ -127,6 +127,16 @@ export class ZabbixTrigger implements INodeType {
 				displayOptions: { show: { event: ['problem', 'resolved'] } },
 			},
 			{
+				displayName: 'Suppress Repeats (Minutes)',
+				name: 'dedupMinutes',
+				type: 'number',
+				typeOptions: { minValue: 0 },
+				default: 0,
+				description:
+					'Fire at most once per trigger within this window — a problem that reopens (flapping) inside it is skipped. 0 = off.',
+				displayOptions: { show: { event: ['problem', 'resolved'] } },
+			},
+			{
 				displayName: 'Name Matches (Regex)',
 				name: 'nameMatches',
 				type: 'string',
@@ -164,7 +174,7 @@ export class ZabbixTrigger implements INodeType {
 
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const mode = this.getNodeParameter('event', 'problem') as string;
-		const minSeverity = this.getNodeParameter('severity', 0) as number;
+		const minSeverity = parseSeverity(this.getNodeParameter('severity', 0));
 
 		const query: IDataObject = {
 			output: 'extend',
@@ -245,6 +255,23 @@ export class ZabbixTrigger implements INodeType {
 			);
 		}
 		matching = matching.filter(nameFilter.call(this));
+
+		const dedupSeconds = ((this.getNodeParameter('dedupMinutes', 0) as number) || 0) * 60;
+		if (dedupSeconds > 0 && mode !== 'event') {
+			const lastFired = (staticData.lastFiredByTrigger ?? {}) as IDataObject;
+			const kept: IDataObject[] = [];
+			for (const event of matching) {
+				const key = String(event.objectid);
+				const clock = Number(event.clock);
+				if (lastFired[key] !== undefined && clock - Number(lastFired[key]) < dedupSeconds) continue;
+				lastFired[key] = clock;
+				kept.push(event);
+			}
+			const horizon = Math.floor(Date.now() / 1000) - dedupSeconds;
+			for (const key of Object.keys(lastFired)) if (Number(lastFired[key]) < horizon) delete lastFired[key];
+			staticData.lastFiredByTrigger = lastFired;
+			matching = kept;
+		}
 
 		const items = await enrich.call(this, mode, matching);
 		staticData.lastEventId = String(watermark);

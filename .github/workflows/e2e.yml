@@ -77,6 +77,9 @@ jobs:
       - name: E2E — cross-version compatibility
         run: npm run test:e2e:compat
 
+      - name: E2E — NOC operations and webhook trigger
+        run: npm run test:e2e:noc
+
       - name: Zabbix logs on failure
         if: failure()
         run: docker compose -f test/docker-compose.zabbix.yml logs --tail=200 zabbix-server zabbix-web
