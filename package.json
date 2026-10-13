@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-zabbix",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "n8n community nodes for the Zabbix API (7.x/8.0) — 60 resources, NOC triage operations, polling and webhook triggers",
 	"license": "MIT",
 	"publishConfig": {

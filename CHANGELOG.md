@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Release pipeline: publish through npm trusted publishing (OIDC). Same contents as 0.3.0.
+
 ## 0.3.0
 
 ### Added
