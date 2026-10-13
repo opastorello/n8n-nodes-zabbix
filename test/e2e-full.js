@@ -448,6 +448,8 @@ const ids = (out, k) => (out && out[0] && out[0][k] ? out[0][k] : [undefined]);
 	for (const key of ['problem.getContext', 'host.getHealth']) skipped.set(key, 'coberto por e2e-trigger (problema real)');
 	for (const key of ['host.linkTemplates', 'host.unlinkTemplates', 'host.enable', 'host.disable'])
 		skipped.set(key, 'coberto por e2e-compat (estado verificado)');
+	for (const key of ['item.getHistory', 'item.getGraphImage', 'host.setTags', 'host.setMacros', 'host.getSiteSummary', 'event.whoGetsNotified', 'mediatype.createN8nWebhook'])
+		skipped.set(key, 'coberto por e2e-noc (estado verificado)');
 
 	// -------- cobertura --------
 	console.log('\n=== COBERTURA ===');
